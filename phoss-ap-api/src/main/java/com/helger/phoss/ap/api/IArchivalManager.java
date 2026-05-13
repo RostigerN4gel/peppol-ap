@@ -69,7 +69,7 @@ public interface IArchivalManager
    *        Predicate invoked with the absolute document path; returns <code>true</code> when row
    *        deletion should proceed. May not be <code>null</code>.
    * @return The number of archive rows successfully deleted.
-   * @since 0.2.4
+   * @since 0.9.0
    */
   @Nonnegative
   int cleanupOutbound (@NonNull OffsetDateTime aCutoff,
@@ -89,7 +89,7 @@ public interface IArchivalManager
    *        Predicate invoked with the absolute document path; returns <code>true</code> when row
    *        deletion should proceed. May not be <code>null</code>.
    * @return The number of archive rows successfully deleted.
-   * @since 0.2.4
+   * @since 0.9.0
    */
   @Nonnegative
   int cleanupInbound (@NonNull OffsetDateTime aCutoff,

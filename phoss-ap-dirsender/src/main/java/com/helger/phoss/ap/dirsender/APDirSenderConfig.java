@@ -96,7 +96,7 @@ public final class APDirSenderConfig
 
   /**
    * @return The interval between directory scans. Never <code>null</code>.
-   * @since 0.2.4
+   * @since 0.9.0
    */
   @NonNull
   public static Duration getScanInterval ()
@@ -108,10 +108,10 @@ public final class APDirSenderConfig
 
   /**
    * @return The interval in milliseconds between directory scans.
-   * @deprecated Since 0.2.4; use {@link #getScanInterval()} instead.
+   * @deprecated Since 0.9.0; use {@link #getScanInterval()} instead.
    */
   @Nonnegative
-  @Deprecated (forRemoval = true, since = "0.2.4")
+  @Deprecated (forRemoval = true, since = "0.9.0")
   public static long getScanIntervalMs ()
   {
     return getScanInterval ().toMillis ();
@@ -119,7 +119,7 @@ public final class APDirSenderConfig
 
   /**
    * @return The delay before the first directory scan after startup. Never <code>null</code>.
-   * @since 0.2.4
+   * @since 0.9.0
    */
   @NonNull
   public static Duration getInitialDelay ()
@@ -131,10 +131,10 @@ public final class APDirSenderConfig
 
   /**
    * @return The delay in milliseconds before the first directory scan after startup.
-   * @deprecated Since 0.2.4; use {@link #getInitialDelay()} instead.
+   * @deprecated Since 0.9.0; use {@link #getInitialDelay()} instead.
    */
   @Nonnegative
-  @Deprecated (forRemoval = true, since = "0.2.4")
+  @Deprecated (forRemoval = true, since = "0.9.0")
   public static long getInitialDelayMs ()
   {
     return getInitialDelay ().toMillis ();

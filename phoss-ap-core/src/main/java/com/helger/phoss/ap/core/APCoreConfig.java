@@ -214,7 +214,7 @@ public final class APCoreConfig
    *         certificate validation succeeds even if the revocation status cannot be determined
    *         (e.g. due to network errors reaching the CRL or OCSP responder). Maps to
    *         {@link com.helger.security.revocation.CertificateRevocationCheckerDefaults#setAllowSoftFail(boolean)}.
-   * @since 0.2.4
+   * @since 0.9.0
    */
   public static boolean isRevocationSoftFailAllowed ()
   {
@@ -288,7 +288,7 @@ public final class APCoreConfig
 
   /**
    * @return The initial backoff duration for outbound sending retries. Never <code>null</code>.
-   * @since 0.2.4
+   * @since 0.9.0
    */
   @NonNull
   public static Duration getRetrySendingInitialBackoff ()
@@ -300,9 +300,9 @@ public final class APCoreConfig
 
   /**
    * @return The initial backoff duration in milliseconds for outbound sending retries.
-   * @deprecated Since 0.2.4; use {@link #getRetrySendingInitialBackoff()} instead.
+   * @deprecated Since 0.9.0; use {@link #getRetrySendingInitialBackoff()} instead.
    */
-  @Deprecated (forRemoval = true, since = "0.2.4")
+  @Deprecated (forRemoval = true, since = "0.9.0")
   public static long getRetrySendingInitialBackoffMs ()
   {
     return getRetrySendingInitialBackoff ().toMillis ();
@@ -319,7 +319,7 @@ public final class APCoreConfig
 
   /**
    * @return The maximum backoff duration for outbound sending retries. Never <code>null</code>.
-   * @since 0.2.4
+   * @since 0.9.0
    */
   @NonNull
   public static Duration getRetrySendingMaxBackoff ()
@@ -331,9 +331,9 @@ public final class APCoreConfig
 
   /**
    * @return The maximum backoff duration in milliseconds for outbound sending retries.
-   * @deprecated Since 0.2.4; use {@link #getRetrySendingMaxBackoff()} instead.
+   * @deprecated Since 0.9.0; use {@link #getRetrySendingMaxBackoff()} instead.
    */
-  @Deprecated (forRemoval = true, since = "0.2.4")
+  @Deprecated (forRemoval = true, since = "0.9.0")
   public static long getRetrySendingMaxBackoffMs ()
   {
     return getRetrySendingMaxBackoff ().toMillis ();
@@ -351,7 +351,7 @@ public final class APCoreConfig
 
   /**
    * @return The initial backoff duration for inbound forwarding retries. Never <code>null</code>.
-   * @since 0.2.4
+   * @since 0.9.0
    */
   @NonNull
   public static Duration getRetryForwardingInitialBackoff ()
@@ -363,10 +363,10 @@ public final class APCoreConfig
 
   /**
    * @return The initial backoff duration in milliseconds for inbound forwarding retries.
-   * @deprecated Since 0.2.4; use {@link #getRetryForwardingInitialBackoff()} instead.
+   * @deprecated Since 0.9.0; use {@link #getRetryForwardingInitialBackoff()} instead.
    */
   @Nonnegative
-  @Deprecated (forRemoval = true, since = "0.2.4")
+  @Deprecated (forRemoval = true, since = "0.9.0")
   public static long getRetryForwardingInitialBackoffMs ()
   {
     return getRetryForwardingInitialBackoff ().toMillis ();
@@ -384,7 +384,7 @@ public final class APCoreConfig
 
   /**
    * @return The maximum backoff duration for inbound forwarding retries. Never <code>null</code>.
-   * @since 0.2.4
+   * @since 0.9.0
    */
   @NonNull
   public static Duration getRetryForwardingMaxBackoff ()
@@ -396,10 +396,10 @@ public final class APCoreConfig
 
   /**
    * @return The maximum backoff duration in milliseconds for inbound forwarding retries.
-   * @deprecated Since 0.2.4; use {@link #getRetryForwardingMaxBackoff()} instead.
+   * @deprecated Since 0.9.0; use {@link #getRetryForwardingMaxBackoff()} instead.
    */
   @Nonnegative
-  @Deprecated (forRemoval = true, since = "0.2.4")
+  @Deprecated (forRemoval = true, since = "0.9.0")
   public static long getRetryForwardingMaxBackoffMs ()
   {
     return getRetryForwardingMaxBackoff ().toMillis ();
@@ -408,7 +408,7 @@ public final class APCoreConfig
   /**
    * @return The interval at which the retry scheduler checks for transactions to retry. Never
    *         <code>null</code>.
-   * @since 0.2.4
+   * @since 0.9.0
    */
   @NonNull
   public static Duration getRetrySchedulerInterval ()
@@ -421,10 +421,10 @@ public final class APCoreConfig
   /**
    * @return The interval in milliseconds at which the retry scheduler checks for transactions to
    *         retry.
-   * @deprecated Since 0.2.4; use {@link #getRetrySchedulerInterval()} instead.
+   * @deprecated Since 0.9.0; use {@link #getRetrySchedulerInterval()} instead.
    */
   @Nonnegative
-  @Deprecated (forRemoval = true, since = "0.2.4")
+  @Deprecated (forRemoval = true, since = "0.9.0")
   public static long getRetrySchedulerIntervalMs ()
   {
     return getRetrySchedulerInterval ().toMillis ();
@@ -454,7 +454,7 @@ public final class APCoreConfig
   /**
    * @return The duration the circuit breaker stays open before transitioning to half-open. Never
    *         <code>null</code>.
-   * @since 0.2.4
+   * @since 0.9.0
    */
   @NonNull
   public static Duration getCircuitBreakerOpenDuration ()
@@ -467,10 +467,10 @@ public final class APCoreConfig
   /**
    * @return The duration in milliseconds the circuit breaker stays open before transitioning to
    *         half-open.
-   * @deprecated Since 0.2.4; use {@link #getCircuitBreakerOpenDuration()} instead.
+   * @deprecated Since 0.9.0; use {@link #getCircuitBreakerOpenDuration()} instead.
    */
   @Nonnegative
-  @Deprecated (forRemoval = true, since = "0.2.4")
+  @Deprecated (forRemoval = true, since = "0.9.0")
   public static long getCircuitBreakerOpenDurationMs ()
   {
     return getCircuitBreakerOpenDuration ().toMillis ();
@@ -637,7 +637,7 @@ public final class APCoreConfig
 
   /**
    * @return The interval at which the archival scheduler runs. Never <code>null</code>.
-   * @since 0.2.4
+   * @since 0.9.0
    */
   @NonNull
   public static Duration getArchivalSchedulerInterval ()
@@ -649,9 +649,9 @@ public final class APCoreConfig
 
   /**
    * @return The interval in milliseconds at which the archival scheduler runs.
-   * @deprecated Since 0.2.4; use {@link #getArchivalSchedulerInterval()} instead.
+   * @deprecated Since 0.9.0; use {@link #getArchivalSchedulerInterval()} instead.
    */
-  @Deprecated (forRemoval = true, since = "0.2.4")
+  @Deprecated (forRemoval = true, since = "0.9.0")
   public static long getArchivalSchedulerIntervalMs ()
   {
     return getArchivalSchedulerInterval ().toMillis ();
@@ -671,7 +671,7 @@ public final class APCoreConfig
   /**
    * @return {@code true} if the cleanup scheduler that deletes archived transactions older than the
    *         configured retention is enabled. Defaults to {@code false}.
-   * @since 0.2.4
+   * @since 0.9.0
    */
   public static boolean isCleanupSchedulerEnabled ()
   {
@@ -684,7 +684,7 @@ public final class APCoreConfig
    *         {@code "24h"}, {@code "2d 12h"}). Defaults to
    *         {@link APConfigurationProperties#CLEANUP_SCHEDULER_INTERVAL_DEFAULT}. Never
    *         <code>null</code>.
-   * @since 0.2.4
+   * @since 0.9.0
    */
   @NonNull
   public static Duration getCleanupSchedulerInterval ()
@@ -705,7 +705,7 @@ public final class APCoreConfig
    *         {@code "90d"}, {@code "26w"} not supported — use {@code "182d"}). Defaults to
    *         {@link APConfigurationProperties#CLEANUP_SCHEDULER_RETENTION_DEFAULT}. Never
    *         <code>null</code>.
-   * @since 0.2.4
+   * @since 0.9.0
    */
   @NonNull
   public static Duration getCleanupSchedulerRetention ()
@@ -723,7 +723,7 @@ public final class APCoreConfig
   /**
    * @return The number of archived transactions to clean up per scheduler cycle. Default is
    *         {@code 100}.
-   * @since 0.2.4
+   * @since 0.9.0
    */
   @Nonnegative
   public static int getCleanupSchedulerBatchSize ()
@@ -753,7 +753,7 @@ public final class APCoreConfig
 
   /**
    * @return The graceful shutdown timeout. Never <code>null</code>.
-   * @since 0.2.4
+   * @since 0.9.0
    */
   @NonNull
   public static Duration getShutdownTimeout ()
@@ -765,9 +765,9 @@ public final class APCoreConfig
 
   /**
    * @return The graceful shutdown timeout in milliseconds.
-   * @deprecated Since 0.2.4; use {@link #getShutdownTimeout()} instead.
+   * @deprecated Since 0.9.0; use {@link #getShutdownTimeout()} instead.
    */
-  @Deprecated (forRemoval = true, since = "0.2.4")
+  @Deprecated (forRemoval = true, since = "0.9.0")
   public static long getShutdownTimeoutMs ()
   {
     return getShutdownTimeout ().toMillis ();

@@ -49,7 +49,7 @@ public final class BackoffCalculator
    * @param aMaxBackoff
    *        The maximum backoff duration. May not be <code>null</code>.
    * @return The calculated next retry timestamp. Never <code>null</code>.
-   * @since 0.2.4
+   * @since 0.9.0
    */
   @NonNull
   public static OffsetDateTime calculateNextRetry (@Nonnegative final int nAttemptCount,
@@ -76,11 +76,11 @@ public final class BackoffCalculator
    * @param nMaxBackoffMs
    *        The maximum backoff duration in milliseconds. Must be &gt;= 0.
    * @return The calculated next retry timestamp. Never <code>null</code>.
-   * @deprecated Since 0.2.4; use
+   * @deprecated Since 0.9.0; use
    *             {@link #calculateNextRetry(int, Duration, double, Duration)} instead.
    */
   @NonNull
-  @Deprecated (forRemoval = true, since = "0.2.4")
+  @Deprecated (forRemoval = true, since = "0.9.0")
   public static OffsetDateTime calculateNextRetry (@Nonnegative final int nAttemptCount,
                                                    @Nonnegative final long nInitialBackoffMs,
                                                    @Nonnegative final double dMultiplier,

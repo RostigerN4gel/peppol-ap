@@ -45,7 +45,7 @@ import com.helger.phoss.ap.db.APJdbcMetaManager;
  * accumulate.
  *
  * @author Philip Helger
- * @since 0.2.4
+ * @since 0.9.0
  */
 public final class CleanupScheduler
 {
