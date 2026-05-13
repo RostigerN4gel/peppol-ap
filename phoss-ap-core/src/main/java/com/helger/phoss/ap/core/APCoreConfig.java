@@ -50,6 +50,7 @@ import com.helger.phoss.ap.api.config.APConfigurationProperties;
  * @author Philip Helger
  */
 @Immutable
+@SuppressWarnings ("removal")
 public final class APCoreConfig
 {
   private static final Logger LOGGER = LoggerFactory.getLogger (APCoreConfig.class);
@@ -61,6 +62,49 @@ public final class APCoreConfig
   private static IConfigWithFallback _getConfig ()
   {
     return APConfigProvider.getConfig ();
+  }
+
+  /**
+   * Resolve a duration-typed configuration value, preferring the duration-grammar key over the
+   * legacy millisecond-typed key. The duration-grammar key accepts compound expressions like
+   * <code>10s</code>, <code>5m</code>, <code>2d 5h 30m</code>. If the duration key is missing,
+   * blank, or fails to parse, the legacy <code>.ms</code> key is read as a <code>long</code>; if it
+   * too is absent the supplied default is returned.
+   *
+   * @param sDurationKey
+   *        The duration-grammar configuration key (e.g.
+   *        <code>"retry.sending.initial-backoff"</code>).
+   * @param sLegacyMillisKey
+   *        The legacy millisecond-typed configuration key (e.g.
+   *        <code>"retry.sending.initial-backoff.ms"</code>).
+   * @param aDefault
+   *        The default value if neither key is configured.
+   * @return The resolved duration. Never <code>null</code>.
+   */
+  @NonNull
+  private static Duration _getDurationOrLegacy (@NonNull final String sDurationKey,
+                                                @NonNull final String sLegacyMillisKey,
+                                                @NonNull final Duration aDefault)
+  {
+    final Duration aDuration = _getConfig ().getAsConfigDuration (sDurationKey,
+                                                                  sErr -> LOGGER.warn ("Failed to parse configuration key '" +
+                                                                                       sDurationKey +
+                                                                                       "' as duration: " +
+                                                                                       sErr));
+    if (aDuration != null)
+      return aDuration;
+
+    if (_getConfig ().containsConfiguredValue (sLegacyMillisKey))
+    {
+      LOGGER.warn ("Configuration key '" +
+                   sLegacyMillisKey +
+                   "' is deprecated; please use '" +
+                   sDurationKey +
+                   "' with the duration grammar (e.g. '5s', '1m 30s') instead.");
+      return Duration.ofMillis (_getConfig ().getAsLong (sLegacyMillisKey, aDefault.toMillis ()));
+    }
+
+    return aDefault;
   }
 
   /**
@@ -243,12 +287,25 @@ public final class APCoreConfig
   }
 
   /**
-   * @return The initial backoff duration in milliseconds for outbound sending retries.
+   * @return The initial backoff duration for outbound sending retries. Never <code>null</code>.
+   * @since 0.2.4
    */
+  @NonNull
+  public static Duration getRetrySendingInitialBackoff ()
+  {
+    return _getDurationOrLegacy (APConfigurationProperties.RETRY_SENDING_INITIAL_BACKOFF,
+                                 APConfigurationProperties.RETRY_SENDING_INITIAL_BACKOFF_MS,
+                                 APConfigurationProperties.RETRY_SENDING_INITIAL_BACKOFF_DEFAULT);
+  }
+
+  /**
+   * @return The initial backoff duration in milliseconds for outbound sending retries.
+   * @deprecated Since 0.2.4; use {@link #getRetrySendingInitialBackoff()} instead.
+   */
+  @Deprecated (forRemoval = true, since = "0.2.4")
   public static long getRetrySendingInitialBackoffMs ()
   {
-    return _getConfig ().getAsLong (APConfigurationProperties.RETRY_SENDING_INITIAL_BACKOFF_MS,
-                                    APConfigurationProperties.RETRY_SENDING_INITIAL_BACKOFF_MS_DEFAULT);
+    return getRetrySendingInitialBackoff ().toMillis ();
   }
 
   /**
@@ -261,12 +318,25 @@ public final class APCoreConfig
   }
 
   /**
-   * @return The maximum backoff duration in milliseconds for outbound sending retries.
+   * @return The maximum backoff duration for outbound sending retries. Never <code>null</code>.
+   * @since 0.2.4
    */
+  @NonNull
+  public static Duration getRetrySendingMaxBackoff ()
+  {
+    return _getDurationOrLegacy (APConfigurationProperties.RETRY_SENDING_MAX_BACKOFF,
+                                 APConfigurationProperties.RETRY_SENDING_MAX_BACKOFF_MS,
+                                 APConfigurationProperties.RETRY_SENDING_MAX_BACKOFF_DEFAULT);
+  }
+
+  /**
+   * @return The maximum backoff duration in milliseconds for outbound sending retries.
+   * @deprecated Since 0.2.4; use {@link #getRetrySendingMaxBackoff()} instead.
+   */
+  @Deprecated (forRemoval = true, since = "0.2.4")
   public static long getRetrySendingMaxBackoffMs ()
   {
-    return _getConfig ().getAsLong (APConfigurationProperties.RETRY_SENDING_MAX_BACKOFF_MS,
-                                    APConfigurationProperties.RETRY_SENDING_MAX_BACKOFF_MS_DEFAULT);
+    return getRetrySendingMaxBackoff ().toMillis ();
   }
 
   /**
@@ -280,13 +350,26 @@ public final class APCoreConfig
   }
 
   /**
+   * @return The initial backoff duration for inbound forwarding retries. Never <code>null</code>.
+   * @since 0.2.4
+   */
+  @NonNull
+  public static Duration getRetryForwardingInitialBackoff ()
+  {
+    return _getDurationOrLegacy (APConfigurationProperties.RETRY_FORWARDING_INITIAL_BACKOFF,
+                                 APConfigurationProperties.RETRY_FORWARDING_INITIAL_BACKOFF_MS,
+                                 APConfigurationProperties.RETRY_FORWARDING_INITIAL_BACKOFF_DEFAULT);
+  }
+
+  /**
    * @return The initial backoff duration in milliseconds for inbound forwarding retries.
+   * @deprecated Since 0.2.4; use {@link #getRetryForwardingInitialBackoff()} instead.
    */
   @Nonnegative
+  @Deprecated (forRemoval = true, since = "0.2.4")
   public static long getRetryForwardingInitialBackoffMs ()
   {
-    return _getConfig ().getAsLong (APConfigurationProperties.RETRY_FORWARDING_INITIAL_BACKOFF_MS,
-                                    APConfigurationProperties.RETRY_FORWARDING_INITIAL_BACKOFF_MS_DEFAULT);
+    return getRetryForwardingInitialBackoff ().toMillis ();
   }
 
   /**
@@ -300,24 +383,51 @@ public final class APCoreConfig
   }
 
   /**
+   * @return The maximum backoff duration for inbound forwarding retries. Never <code>null</code>.
+   * @since 0.2.4
+   */
+  @NonNull
+  public static Duration getRetryForwardingMaxBackoff ()
+  {
+    return _getDurationOrLegacy (APConfigurationProperties.RETRY_FORWARDING_MAX_BACKOFF,
+                                 APConfigurationProperties.RETRY_FORWARDING_MAX_BACKOFF_MS,
+                                 APConfigurationProperties.RETRY_FORWARDING_MAX_BACKOFF_DEFAULT);
+  }
+
+  /**
    * @return The maximum backoff duration in milliseconds for inbound forwarding retries.
+   * @deprecated Since 0.2.4; use {@link #getRetryForwardingMaxBackoff()} instead.
    */
   @Nonnegative
+  @Deprecated (forRemoval = true, since = "0.2.4")
   public static long getRetryForwardingMaxBackoffMs ()
   {
-    return _getConfig ().getAsLong (APConfigurationProperties.RETRY_FORWARDING_MAX_BACKOFF_MS,
-                                    APConfigurationProperties.RETRY_FORWARDING_MAX_BACKOFF_MS_DEFAULT);
+    return getRetryForwardingMaxBackoff ().toMillis ();
+  }
+
+  /**
+   * @return The interval at which the retry scheduler checks for transactions to retry. Never
+   *         <code>null</code>.
+   * @since 0.2.4
+   */
+  @NonNull
+  public static Duration getRetrySchedulerInterval ()
+  {
+    return _getDurationOrLegacy (APConfigurationProperties.RETRY_SCHEDULER_INTERVAL,
+                                 APConfigurationProperties.RETRY_SCHEDULER_INTERVAL_MS,
+                                 APConfigurationProperties.RETRY_SCHEDULER_INTERVAL_DEFAULT);
   }
 
   /**
    * @return The interval in milliseconds at which the retry scheduler checks for transactions to
    *         retry.
+   * @deprecated Since 0.2.4; use {@link #getRetrySchedulerInterval()} instead.
    */
   @Nonnegative
+  @Deprecated (forRemoval = true, since = "0.2.4")
   public static long getRetrySchedulerIntervalMs ()
   {
-    return _getConfig ().getAsLong (APConfigurationProperties.RETRY_SCHEDULER_INTERVAL_MS,
-                                    APConfigurationProperties.RETRY_SCHEDULER_INTERVAL_MS_DEFAULT);
+    return getRetrySchedulerInterval ().toMillis ();
   }
 
   /**
@@ -342,14 +452,28 @@ public final class APCoreConfig
   }
 
   /**
+   * @return The duration the circuit breaker stays open before transitioning to half-open. Never
+   *         <code>null</code>.
+   * @since 0.2.4
+   */
+  @NonNull
+  public static Duration getCircuitBreakerOpenDuration ()
+  {
+    return _getDurationOrLegacy (APConfigurationProperties.CIRCUIT_BREAKER_OPEN_DURATION,
+                                 APConfigurationProperties.CIRCUIT_BREAKER_OPEN_DURATION_MS,
+                                 APConfigurationProperties.CIRCUIT_BREAKER_OPEN_DURATION_DEFAULT);
+  }
+
+  /**
    * @return The duration in milliseconds the circuit breaker stays open before transitioning to
    *         half-open.
+   * @deprecated Since 0.2.4; use {@link #getCircuitBreakerOpenDuration()} instead.
    */
   @Nonnegative
+  @Deprecated (forRemoval = true, since = "0.2.4")
   public static long getCircuitBreakerOpenDurationMs ()
   {
-    return _getConfig ().getAsLong (APConfigurationProperties.CIRCUIT_BREAKER_OPEN_DURATION_MS,
-                                    APConfigurationProperties.CIRCUIT_BREAKER_OPEN_DURATION_MS_DEFAULT);
+    return getCircuitBreakerOpenDuration ().toMillis ();
   }
 
   /**
@@ -512,12 +636,25 @@ public final class APCoreConfig
   }
 
   /**
-   * @return The interval in milliseconds at which the archival scheduler runs.
+   * @return The interval at which the archival scheduler runs. Never <code>null</code>.
+   * @since 0.2.4
    */
+  @NonNull
+  public static Duration getArchivalSchedulerInterval ()
+  {
+    return _getDurationOrLegacy (APConfigurationProperties.ARCHIVAL_SCHEDULER_INTERVAL,
+                                 APConfigurationProperties.ARCHIVAL_SCHEDULER_INTERVAL_MS,
+                                 APConfigurationProperties.ARCHIVAL_SCHEDULER_INTERVAL_DEFAULT);
+  }
+
+  /**
+   * @return The interval in milliseconds at which the archival scheduler runs.
+   * @deprecated Since 0.2.4; use {@link #getArchivalSchedulerInterval()} instead.
+   */
+  @Deprecated (forRemoval = true, since = "0.2.4")
   public static long getArchivalSchedulerIntervalMs ()
   {
-    return _getConfig ().getAsLong (APConfigurationProperties.ARCHIVAL_SCHEDULER_INTERVAL_MS,
-                                    APConfigurationProperties.ARCHIVAL_SCHEDULER_INTERVAL_MS_DEFAULT);
+    return getArchivalSchedulerInterval ().toMillis ();
   }
 
   /**
@@ -564,8 +701,8 @@ public final class APCoreConfig
 
   /**
    * @return The retention duration: archived transactions whose {@code completed_dt} is older than
-   *         this value are eligible for cleanup. Configured as a duration string (e.g. {@code "90d"},
-   *         {@code "26w"} not supported — use {@code "182d"}). Defaults to
+   *         this value are eligible for cleanup. Configured as a duration string (e.g.
+   *         {@code "90d"}, {@code "26w"} not supported — use {@code "182d"}). Defaults to
    *         {@link APConfigurationProperties#CLEANUP_SCHEDULER_RETENTION_DEFAULT}. Never
    *         <code>null</code>.
    * @since 0.2.4
@@ -615,12 +752,25 @@ public final class APCoreConfig
   }
 
   /**
-   * @return The graceful shutdown timeout in milliseconds.
+   * @return The graceful shutdown timeout. Never <code>null</code>.
+   * @since 0.2.4
    */
+  @NonNull
+  public static Duration getShutdownTimeout ()
+  {
+    return _getDurationOrLegacy (APConfigurationProperties.SHUTDOWN_TIMEOUT,
+                                 APConfigurationProperties.SHUTDOWN_TIMEOUT_MS,
+                                 APConfigurationProperties.SHUTDOWN_TIMEOUT_DEFAULT);
+  }
+
+  /**
+   * @return The graceful shutdown timeout in milliseconds.
+   * @deprecated Since 0.2.4; use {@link #getShutdownTimeout()} instead.
+   */
+  @Deprecated (forRemoval = true, since = "0.2.4")
   public static long getShutdownTimeoutMs ()
   {
-    return _getConfig ().getAsLong (APConfigurationProperties.SHUTDOWN_TIMEOUT_MS,
-                                    APConfigurationProperties.SHUTDOWN_TIMEOUT_MS_DEFAULT);
+    return getShutdownTimeout ().toMillis ();
   }
 
   /**

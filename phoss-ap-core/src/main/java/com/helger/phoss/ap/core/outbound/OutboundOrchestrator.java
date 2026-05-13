@@ -420,9 +420,9 @@ public final class OutboundOrchestrator
                             sErrMsg,
                             aSendingReport.getAsJsonString ());
         final OffsetDateTime aNextRetry = BackoffCalculator.calculateNextRetry (nNewAttemptCount,
-                                                                                APCoreConfig.getRetrySendingInitialBackoffMs (),
+                                                                                APCoreConfig.getRetrySendingInitialBackoff (),
                                                                                 APCoreConfig.getRetrySendingBackoffMultiplier (),
-                                                                                APCoreConfig.getRetrySendingMaxBackoffMs ());
+                                                                                APCoreConfig.getRetrySendingMaxBackoff ());
         aTxMgr.updateStatusAndRetry (sTxID, EOutboundStatus.FAILED, nNewAttemptCount, aNextRetry, sErrMsg);
       };
 

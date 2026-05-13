@@ -187,9 +187,9 @@ public final class InboundOrchestrator
       {
         // Calculate the next retry and remember it
         final var aNextRetry = BackoffCalculator.calculateNextRetry (nNewAttemptCount,
-                                                                     APCoreConfig.getRetryForwardingInitialBackoffMs (),
+                                                                     APCoreConfig.getRetryForwardingInitialBackoff (),
                                                                      APCoreConfig.getRetryForwardingBackoffMultiplier (),
-                                                                     APCoreConfig.getRetryForwardingMaxBackoffMs ());
+                                                                     APCoreConfig.getRetryForwardingMaxBackoff ());
         aTxMgr.updateStatusAndRetry (aInboundTx.getID (),
                                      EInboundStatus.FORWARD_FAILED,
                                      nNewAttemptCount,

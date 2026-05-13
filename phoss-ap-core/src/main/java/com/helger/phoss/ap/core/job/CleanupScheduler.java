@@ -149,8 +149,7 @@ public final class CleanupScheduler
                                          APConfigurationProperties.CLEANUP_SCHEDULER_RETENTION +
                                          "' to a value of at least 2 days.");
 
-    final long nArchivalIntervalMs = APCoreConfig.getArchivalSchedulerIntervalMs ();
-    final Duration aArchivalSafetyWindow = Duration.ofMillis (nArchivalIntervalMs).multipliedBy (2);
+    final Duration aArchivalSafetyWindow = APCoreConfig.getArchivalSchedulerInterval ().multipliedBy (2);
     if (aRetention.compareTo (aArchivalSafetyWindow) < 0)
       throw new InitializationException ("Cleanup retention '" +
                                          aRetention +

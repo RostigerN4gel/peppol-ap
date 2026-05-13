@@ -16,6 +16,7 @@
  */
 package com.helger.phoss.ap.core.job;
 
+import java.time.Duration;
 import java.util.Timer;
 import java.util.TimerTask;
 
@@ -119,10 +120,11 @@ public final class ArchivalScheduler
     if (nBatchSize < 1)
       throw new InitializationException ("The archival scheduler batch size must be >= 1, but is " + nBatchSize);
 
-    final long nIntervalMs = APCoreConfig.getArchivalSchedulerIntervalMs ();
+    final Duration aInterval = APCoreConfig.getArchivalSchedulerInterval ();
+    final long nIntervalMs = aInterval.toMillis ();
     LOGGER.info ("Starting phoss AP archival scheduler with interval " +
-                 nIntervalMs +
-                 " ms and batch size " +
+                 aInterval +
+                 " and batch size " +
                  nBatchSize);
 
     s_aTimer = new Timer ("phoss-ap-archival-scheduler", true);

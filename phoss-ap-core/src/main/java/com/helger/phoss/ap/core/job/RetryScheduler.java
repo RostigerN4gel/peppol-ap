@@ -16,6 +16,7 @@
  */
 package com.helger.phoss.ap.core.job;
 
+import java.time.Duration;
 import java.util.Timer;
 import java.util.TimerTask;
 
@@ -140,8 +141,9 @@ public final class RetryScheduler
     if (nBatchSize < 1)
       throw new InitializationException ("The retry scheduler batch size must be >= 1, but is " + nBatchSize);
 
-    final long nIntervalMs = APCoreConfig.getRetrySchedulerIntervalMs ();
-    LOGGER.info ("Starting phoss AP retry scheduler with interval " + nIntervalMs + " ms and batch size " + nBatchSize);
+    final Duration aInterval = APCoreConfig.getRetrySchedulerInterval ();
+    final long nIntervalMs = aInterval.toMillis ();
+    LOGGER.info ("Starting phoss AP retry scheduler with interval " + aInterval + " and batch size " + nBatchSize);
 
     s_aTimer = new Timer ("phoss-ap-retry-scheduler", true);
     s_aTimer.scheduleAtFixedRate (new TimerTask ()

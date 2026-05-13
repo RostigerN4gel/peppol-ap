@@ -17,6 +17,7 @@
 package com.helger.phoss.ap.dirsender;
 
 import java.io.File;
+import java.time.Duration;
 import java.util.Timer;
 
 import org.slf4j.Logger;
@@ -101,19 +102,18 @@ public final class DirectorySenderScheduler
     // Startup recovery: process files stuck in pending/
     _recoverPendingFiles (aWatchDir, aPendingDir);
 
-    final long nScanIntervalMs = APDirSenderConfig.getScanIntervalMs ();
-    final long nInitialDelayMs = APDirSenderConfig.getInitialDelayMs ();
+    final Duration aScanInterval = APDirSenderConfig.getScanInterval ();
+    final Duration aInitialDelay = APDirSenderConfig.getInitialDelay ();
 
     LOGGER.info ("Starting directory sender: directory='" +
                  sDirectory +
                  "', scan-interval=" +
-                 nScanIntervalMs +
-                 " ms, initial-delay=" +
-                 nInitialDelayMs +
-                 " ms");
+                 aScanInterval +
+                 ", initial-delay=" +
+                 aInitialDelay);
 
     s_aTimer = new Timer ("phoss-ap-dir-sender", true);
-    s_aTimer.scheduleAtFixedRate (new DirectoryScanTask (aWatchDir), nInitialDelayMs, nScanIntervalMs);
+    s_aTimer.scheduleAtFixedRate (new DirectoryScanTask (aWatchDir), aInitialDelay.toMillis (), aScanInterval.toMillis ());
   }
 
   /**

@@ -56,13 +56,45 @@ public final class APConfigurationProperties
   // Connection pooling
   public static final String JDBC_POOLING_MAX_CONNECTIONS = "pooling.max-connections";
   public static final int JDBC_POOLING_MAX_CONNECTIONS_DEFAULT = 8;
+  /** @since 0.2.4 */
+  public static final String JDBC_POOLING_MAX_WAIT = "pooling.max-wait";
+  /** @since 0.2.4 */
+  public static final Duration JDBC_POOLING_MAX_WAIT_DEFAULT = Duration.ofSeconds (10);
+  /** @deprecated Since 0.2.4; use {@link #JDBC_POOLING_MAX_WAIT} with the duration grammar instead. */
+  @Deprecated (forRemoval = true, since = "0.2.4")
   public static final String JDBC_POOLING_MAX_WAIT_MILLIS = "pooling.max-wait.millis";
+  /** @deprecated Since 0.2.4; use {@link #JDBC_POOLING_MAX_WAIT_DEFAULT} instead. */
+  @Deprecated (forRemoval = true, since = "0.2.4")
   public static final long JDBC_POOLING_MAX_WAIT_MILLIS_DEFAULT = 10_000L;
+  /** @since 0.2.4 */
+  public static final String JDBC_POOLING_BETWEEN_EVICTIONS_RUNS = "pooling.between-evictions-runs";
+  /** @since 0.2.4 */
+  public static final Duration JDBC_POOLING_BETWEEN_EVICTIONS_RUNS_DEFAULT = Duration.ofMinutes (5);
+  /** @deprecated Since 0.2.4; use {@link #JDBC_POOLING_BETWEEN_EVICTIONS_RUNS} with the duration grammar instead. */
+  @Deprecated (forRemoval = true, since = "0.2.4")
   public static final String JDBC_POOLING_BETWEEN_EVICTIONS_RUNS_MILLIS = "pooling.between-evictions-runs.millis";
+  /** @deprecated Since 0.2.4; use {@link #JDBC_POOLING_BETWEEN_EVICTIONS_RUNS_DEFAULT} instead. */
+  @Deprecated (forRemoval = true, since = "0.2.4")
   public static final long JDBC_POOLING_BETWEEN_EVICTIONS_RUNS_MILLIS_DEFAULT = 300_000L;
+  /** @since 0.2.4 */
+  public static final String JDBC_POOLING_MIN_EVICTABLE_IDLE = "pooling.min-evictable-idle";
+  /** @since 0.2.4 */
+  public static final Duration JDBC_POOLING_MIN_EVICTABLE_IDLE_DEFAULT = Duration.ofMinutes (30);
+  /** @deprecated Since 0.2.4; use {@link #JDBC_POOLING_MIN_EVICTABLE_IDLE} with the duration grammar instead. */
+  @Deprecated (forRemoval = true, since = "0.2.4")
   public static final String JDBC_POOLING_MIN_EVICTABLE_IDLE_MILLIS = "pooling.min-evictable-idle.millis";
+  /** @deprecated Since 0.2.4; use {@link #JDBC_POOLING_MIN_EVICTABLE_IDLE_DEFAULT} instead. */
+  @Deprecated (forRemoval = true, since = "0.2.4")
   public static final long JDBC_POOLING_MIN_EVICTABLE_IDLE_MILLIS_DEFAULT = 1_800_000L;
+  /** @since 0.2.4 */
+  public static final String JDBC_POOLING_REMOVE_ABANDONED_TIMEOUT = "pooling.remove-abandoned-timeout";
+  /** @since 0.2.4 */
+  public static final Duration JDBC_POOLING_REMOVE_ABANDONED_TIMEOUT_DEFAULT = Duration.ofMinutes (5);
+  /** @deprecated Since 0.2.4; use {@link #JDBC_POOLING_REMOVE_ABANDONED_TIMEOUT} with the duration grammar instead. */
+  @Deprecated (forRemoval = true, since = "0.2.4")
   public static final String JDBC_POOLING_REMOVE_ABANDONED_TIMEOUT_MILLIS = "pooling.remove-abandoned-timeout.millis";
+  /** @deprecated Since 0.2.4; use {@link #JDBC_POOLING_REMOVE_ABANDONED_TIMEOUT_DEFAULT} instead. */
+  @Deprecated (forRemoval = true, since = "0.2.4")
   public static final long JDBC_POOLING_REMOVE_ABANDONED_TIMEOUT_MILLIS_DEFAULT = 300_000L;
 
   // Forwarding
@@ -94,25 +126,65 @@ public final class APConfigurationProperties
   // Retry sending
   public static final String RETRY_SENDING_MAX_ATTEMPTS = "retry.sending.max-attempts";
   public static final int RETRY_SENDING_MAX_ATTEMPTS_DEFAULT = 3;
+  /** @since 0.2.4 */
+  public static final String RETRY_SENDING_INITIAL_BACKOFF = "retry.sending.initial-backoff";
+  /** @since 0.2.4 */
+  public static final Duration RETRY_SENDING_INITIAL_BACKOFF_DEFAULT = Duration.ofMinutes (3);
+  /** @deprecated Since 0.2.4; use {@link #RETRY_SENDING_INITIAL_BACKOFF} with the duration grammar instead. */
+  @Deprecated (forRemoval = true, since = "0.2.4")
   public static final String RETRY_SENDING_INITIAL_BACKOFF_MS = "retry.sending.initial-backoff.ms";
+  /** @deprecated Since 0.2.4; use {@link #RETRY_SENDING_INITIAL_BACKOFF_DEFAULT} instead. */
+  @Deprecated (forRemoval = true, since = "0.2.4")
   public static final long RETRY_SENDING_INITIAL_BACKOFF_MS_DEFAULT = 180_000L;
   public static final String RETRY_SENDING_BACKOFF_MULTIPLIER = "retry.sending.backoff-multiplier";
   public static final double RETRY_SENDING_BACKOFF_MULTIPLIER_DEFAULT = 2.0;
+  /** @since 0.2.4 */
+  public static final String RETRY_SENDING_MAX_BACKOFF = "retry.sending.max-backoff";
+  /** @since 0.2.4 */
+  public static final Duration RETRY_SENDING_MAX_BACKOFF_DEFAULT = Duration.ofHours (1);
+  /** @deprecated Since 0.2.4; use {@link #RETRY_SENDING_MAX_BACKOFF} with the duration grammar instead. */
+  @Deprecated (forRemoval = true, since = "0.2.4")
   public static final String RETRY_SENDING_MAX_BACKOFF_MS = "retry.sending.max-backoff.ms";
+  /** @deprecated Since 0.2.4; use {@link #RETRY_SENDING_MAX_BACKOFF_DEFAULT} instead. */
+  @Deprecated (forRemoval = true, since = "0.2.4")
   public static final long RETRY_SENDING_MAX_BACKOFF_MS_DEFAULT = 3_600_000L;
 
   // Retry forwarding
   public static final String RETRY_FORWARDING_MAX_ATTEMPTS = "retry.forwarding.max-attempts";
   public static final int RETRY_FORWARDING_MAX_ATTEMPTS_DEFAULT = 3;
+  /** @since 0.2.4 */
+  public static final String RETRY_FORWARDING_INITIAL_BACKOFF = "retry.forwarding.initial-backoff";
+  /** @since 0.2.4 */
+  public static final Duration RETRY_FORWARDING_INITIAL_BACKOFF_DEFAULT = Duration.ofMinutes (1);
+  /** @deprecated Since 0.2.4; use {@link #RETRY_FORWARDING_INITIAL_BACKOFF} with the duration grammar instead. */
+  @Deprecated (forRemoval = true, since = "0.2.4")
   public static final String RETRY_FORWARDING_INITIAL_BACKOFF_MS = "retry.forwarding.initial-backoff.ms";
+  /** @deprecated Since 0.2.4; use {@link #RETRY_FORWARDING_INITIAL_BACKOFF_DEFAULT} instead. */
+  @Deprecated (forRemoval = true, since = "0.2.4")
   public static final long RETRY_FORWARDING_INITIAL_BACKOFF_MS_DEFAULT = 60_000L;
   public static final String RETRY_FORWARDING_BACKOFF_MULTIPLIER = "retry.forwarding.backoff-multiplier";
   public static final double RETRY_FORWARDING_BACKOFF_MULTIPLIER_DEFAULT = 2.0;
+  /** @since 0.2.4 */
+  public static final String RETRY_FORWARDING_MAX_BACKOFF = "retry.forwarding.max-backoff";
+  /** @since 0.2.4 */
+  public static final Duration RETRY_FORWARDING_MAX_BACKOFF_DEFAULT = Duration.ofHours (1);
+  /** @deprecated Since 0.2.4; use {@link #RETRY_FORWARDING_MAX_BACKOFF} with the duration grammar instead. */
+  @Deprecated (forRemoval = true, since = "0.2.4")
   public static final String RETRY_FORWARDING_MAX_BACKOFF_MS = "retry.forwarding.max-backoff.ms";
+  /** @deprecated Since 0.2.4; use {@link #RETRY_FORWARDING_MAX_BACKOFF_DEFAULT} instead. */
+  @Deprecated (forRemoval = true, since = "0.2.4")
   public static final long RETRY_FORWARDING_MAX_BACKOFF_MS_DEFAULT = 3_600_000L;
 
   // Retry scheduler
+  /** @since 0.2.4 */
+  public static final String RETRY_SCHEDULER_INTERVAL = "retry.scheduler.interval";
+  /** @since 0.2.4 */
+  public static final Duration RETRY_SCHEDULER_INTERVAL_DEFAULT = Duration.ofMinutes (1);
+  /** @deprecated Since 0.2.4; use {@link #RETRY_SCHEDULER_INTERVAL} with the duration grammar instead. */
+  @Deprecated (forRemoval = true, since = "0.2.4")
   public static final String RETRY_SCHEDULER_INTERVAL_MS = "retry.scheduler.interval.ms";
+  /** @deprecated Since 0.2.4; use {@link #RETRY_SCHEDULER_INTERVAL_DEFAULT} instead. */
+  @Deprecated (forRemoval = true, since = "0.2.4")
   public static final long RETRY_SCHEDULER_INTERVAL_MS_DEFAULT = 60_000L;
   public static final String RETRY_SCHEDULER_BATCH_SIZE = "retry.scheduler.batch-size";
   public static final int RETRY_SCHEDULER_BATCH_SIZE_DEFAULT = 50;
@@ -120,7 +192,15 @@ public final class APConfigurationProperties
   // Circuit breaker
   public static final String CIRCUIT_BREAKER_FAILURE_THRESHOLD = "circuit-breaker.failure-threshold";
   public static final int CIRCUIT_BREAKER_FAILURE_THRESHOLD_DEFAULT = 5;
+  /** @since 0.2.4 */
+  public static final String CIRCUIT_BREAKER_OPEN_DURATION = "circuit-breaker.open-duration";
+  /** @since 0.2.4 */
+  public static final Duration CIRCUIT_BREAKER_OPEN_DURATION_DEFAULT = Duration.ofMinutes (1);
+  /** @deprecated Since 0.2.4; use {@link #CIRCUIT_BREAKER_OPEN_DURATION} with the duration grammar instead. */
+  @Deprecated (forRemoval = true, since = "0.2.4")
   public static final String CIRCUIT_BREAKER_OPEN_DURATION_MS = "circuit-breaker.open-duration.ms";
+  /** @deprecated Since 0.2.4; use {@link #CIRCUIT_BREAKER_OPEN_DURATION_DEFAULT} instead. */
+  @Deprecated (forRemoval = true, since = "0.2.4")
   public static final long CIRCUIT_BREAKER_OPEN_DURATION_MS_DEFAULT = 60_000L;
   public static final String CIRCUIT_BREAKER_HALF_OPEN_MAX_ATTEMPTS = "circuit-breaker.half-open-max-attempts";
   public static final int CIRCUIT_BREAKER_HALF_OPEN_MAX_ATTEMPTS_DEFAULT = 1;
@@ -155,7 +235,15 @@ public final class APConfigurationProperties
   // Archival
   public static final String ARCHIVAL_SCHEDULER_ENABLED = "archival.scheduler.enabled";
   public static final boolean ARCHIVAL_SCHEDULER_ENABLED_DEFAULT = true;
+  /** @since 0.2.4 */
+  public static final String ARCHIVAL_SCHEDULER_INTERVAL = "archival.scheduler.interval";
+  /** @since 0.2.4 */
+  public static final Duration ARCHIVAL_SCHEDULER_INTERVAL_DEFAULT = Duration.ofHours (1);
+  /** @deprecated Since 0.2.4; use {@link #ARCHIVAL_SCHEDULER_INTERVAL} with the duration grammar instead. */
+  @Deprecated (forRemoval = true, since = "0.2.4")
   public static final String ARCHIVAL_SCHEDULER_INTERVAL_MS = "archival.scheduler.interval.ms";
+  /** @deprecated Since 0.2.4; use {@link #ARCHIVAL_SCHEDULER_INTERVAL_DEFAULT} instead. */
+  @Deprecated (forRemoval = true, since = "0.2.4")
   public static final long ARCHIVAL_SCHEDULER_INTERVAL_MS_DEFAULT = 3_600_000L;
   public static final String ARCHIVAL_SCHEDULER_BATCH_SIZE = "archival.scheduler.batch-size";
   public static final int ARCHIVAL_SCHEDULER_BATCH_SIZE_DEFAULT = 100;
@@ -202,9 +290,25 @@ public final class APConfigurationProperties
   public static final String DIRSENDER_ENABLED = "dirsender.enabled";
   public static final boolean DIRSENDER_ENABLED_DEFAULT = false;
   public static final String DIRSENDER_DIRECTORY = "dirsender.directory";
+  /** @since 0.2.4 */
+  public static final String DIRSENDER_SCAN_INTERVAL = "dirsender.scan-interval";
+  /** @since 0.2.4 */
+  public static final Duration DIRSENDER_SCAN_INTERVAL_DEFAULT = Duration.ofSeconds (30);
+  /** @deprecated Since 0.2.4; use {@link #DIRSENDER_SCAN_INTERVAL} with the duration grammar instead. */
+  @Deprecated (forRemoval = true, since = "0.2.4")
   public static final String DIRSENDER_SCAN_INTERVAL_MS = "dirsender.scan-interval.ms";
+  /** @deprecated Since 0.2.4; use {@link #DIRSENDER_SCAN_INTERVAL_DEFAULT} instead. */
+  @Deprecated (forRemoval = true, since = "0.2.4")
   public static final long DIRSENDER_SCAN_INTERVAL_MS_DEFAULT = 30_000L;
+  /** @since 0.2.4 */
+  public static final String DIRSENDER_INITIAL_DELAY = "dirsender.initial-delay";
+  /** @since 0.2.4 */
+  public static final Duration DIRSENDER_INITIAL_DELAY_DEFAULT = Duration.ofSeconds (30);
+  /** @deprecated Since 0.2.4; use {@link #DIRSENDER_INITIAL_DELAY} with the duration grammar instead. */
+  @Deprecated (forRemoval = true, since = "0.2.4")
   public static final String DIRSENDER_INITIAL_DELAY_MS = "dirsender.initial-delay.ms";
+  /** @deprecated Since 0.2.4; use {@link #DIRSENDER_INITIAL_DELAY_DEFAULT} instead. */
+  @Deprecated (forRemoval = true, since = "0.2.4")
   public static final long DIRSENDER_INITIAL_DELAY_MS_DEFAULT = 30_000L;
 
   // Management
@@ -212,7 +316,15 @@ public final class APConfigurationProperties
   public static final boolean MANAGEMENT_STATUS_ENABLED_DEFAULT = true;
 
   // Shutdown / Startup
+  /** @since 0.2.4 */
+  public static final String SHUTDOWN_TIMEOUT = "shutdown.timeout";
+  /** @since 0.2.4 */
+  public static final Duration SHUTDOWN_TIMEOUT_DEFAULT = Duration.ofSeconds (30);
+  /** @deprecated Since 0.2.4; use {@link #SHUTDOWN_TIMEOUT} with the duration grammar instead. */
+  @Deprecated (forRemoval = true, since = "0.2.4")
   public static final String SHUTDOWN_TIMEOUT_MS = "shutdown.timeout.ms";
+  /** @deprecated Since 0.2.4; use {@link #SHUTDOWN_TIMEOUT_DEFAULT} instead. */
+  @Deprecated (forRemoval = true, since = "0.2.4")
   public static final long SHUTDOWN_TIMEOUT_MS_DEFAULT = 30_000L;
   public static final String STARTUP_RECOVERY_ENABLED = "startup.recovery.enabled";
   public static final boolean STARTUP_RECOVERY_ENABLED_DEFAULT = true;

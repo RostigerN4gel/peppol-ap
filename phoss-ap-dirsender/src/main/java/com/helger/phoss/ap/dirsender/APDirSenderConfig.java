@@ -16,8 +16,12 @@
  */
 package com.helger.phoss.ap.dirsender;
 
+import java.time.Duration;
+
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.helger.annotation.Nonnegative;
 import com.helger.annotation.concurrent.Immutable;
@@ -32,8 +36,11 @@ import com.helger.phoss.ap.api.config.APConfigurationProperties;
  * @since v0.2.0
  */
 @Immutable
+@SuppressWarnings ("removal")
 public final class APDirSenderConfig
 {
+  private static final Logger LOGGER = LoggerFactory.getLogger (APDirSenderConfig.class);
+
   private APDirSenderConfig ()
   {}
 
@@ -41,6 +48,32 @@ public final class APDirSenderConfig
   private static IConfigWithFallback _getConfig ()
   {
     return APConfigProvider.getConfig ();
+  }
+
+  @NonNull
+  private static Duration _getDurationOrLegacy (@NonNull final String sDurationKey,
+                                                @NonNull final String sLegacyMillisKey,
+                                                @NonNull final Duration aDefault)
+  {
+    final Duration aDuration = _getConfig ().getAsConfigDuration (sDurationKey,
+                                                                  sErr -> LOGGER.warn ("Failed to parse configuration key '" +
+                                                                                       sDurationKey +
+                                                                                       "' as duration: " +
+                                                                                       sErr));
+    if (aDuration != null)
+      return aDuration;
+
+    if (_getConfig ().containsConfiguredValue (sLegacyMillisKey))
+    {
+      LOGGER.warn ("Configuration key '" +
+                   sLegacyMillisKey +
+                   "' is deprecated; please use '" +
+                   sDurationKey +
+                   "' with the duration grammar (e.g. '5s', '1m 30s') instead.");
+      return Duration.ofMillis (_getConfig ().getAsLong (sLegacyMillisKey, aDefault.toMillis ()));
+    }
+
+    return aDefault;
   }
 
   /**
@@ -62,22 +95,48 @@ public final class APDirSenderConfig
   }
 
   /**
+   * @return The interval between directory scans. Never <code>null</code>.
+   * @since 0.2.4
+   */
+  @NonNull
+  public static Duration getScanInterval ()
+  {
+    return _getDurationOrLegacy (APConfigurationProperties.DIRSENDER_SCAN_INTERVAL,
+                                 APConfigurationProperties.DIRSENDER_SCAN_INTERVAL_MS,
+                                 APConfigurationProperties.DIRSENDER_SCAN_INTERVAL_DEFAULT);
+  }
+
+  /**
    * @return The interval in milliseconds between directory scans.
+   * @deprecated Since 0.2.4; use {@link #getScanInterval()} instead.
    */
   @Nonnegative
+  @Deprecated (forRemoval = true, since = "0.2.4")
   public static long getScanIntervalMs ()
   {
-    return _getConfig ().getAsLong (APConfigurationProperties.DIRSENDER_SCAN_INTERVAL_MS,
-                                    APConfigurationProperties.DIRSENDER_SCAN_INTERVAL_MS_DEFAULT);
+    return getScanInterval ().toMillis ();
+  }
+
+  /**
+   * @return The delay before the first directory scan after startup. Never <code>null</code>.
+   * @since 0.2.4
+   */
+  @NonNull
+  public static Duration getInitialDelay ()
+  {
+    return _getDurationOrLegacy (APConfigurationProperties.DIRSENDER_INITIAL_DELAY,
+                                 APConfigurationProperties.DIRSENDER_INITIAL_DELAY_MS,
+                                 APConfigurationProperties.DIRSENDER_INITIAL_DELAY_DEFAULT);
   }
 
   /**
    * @return The delay in milliseconds before the first directory scan after startup.
+   * @deprecated Since 0.2.4; use {@link #getInitialDelay()} instead.
    */
   @Nonnegative
+  @Deprecated (forRemoval = true, since = "0.2.4")
   public static long getInitialDelayMs ()
   {
-    return _getConfig ().getAsLong (APConfigurationProperties.DIRSENDER_INITIAL_DELAY_MS,
-                                    APConfigurationProperties.DIRSENDER_INITIAL_DELAY_MS_DEFAULT);
+    return getInitialDelay ().toMillis ();
   }
 }

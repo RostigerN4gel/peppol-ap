@@ -16,6 +16,7 @@
  */
 package com.helger.phoss.ap.core.helper;
 
+import java.time.Duration;
 import java.time.OffsetDateTime;
 
 import org.jspecify.annotations.NonNull;
@@ -37,7 +38,34 @@ public final class BackoffCalculator
 
   /**
    * Calculate the next retry timestamp using exponential backoff. The backoff duration is computed
-   * as {@code nInitialBackoffMs * dMultiplier^(nAttemptCount-1)}, capped at {@code nMaxBackoffMs}.
+   * as {@code aInitialBackoff * dMultiplier^(nAttemptCount-1)}, capped at {@code aMaxBackoff}.
+   *
+   * @param nAttemptCount
+   *        The current attempt number (1-based). Must be &gt;= 0.
+   * @param aInitialBackoff
+   *        The initial backoff duration. May not be <code>null</code>.
+   * @param dMultiplier
+   *        The multiplier applied for each subsequent attempt. Must be &gt;= 0.
+   * @param aMaxBackoff
+   *        The maximum backoff duration. May not be <code>null</code>.
+   * @return The calculated next retry timestamp. Never <code>null</code>.
+   * @since 0.2.4
+   */
+  @NonNull
+  public static OffsetDateTime calculateNextRetry (@Nonnegative final int nAttemptCount,
+                                                   @NonNull final Duration aInitialBackoff,
+                                                   @Nonnegative final double dMultiplier,
+                                                   @NonNull final Duration aMaxBackoff)
+  {
+    long nBackoffMs = aInitialBackoff.toMillis ();
+    for (int i = 1; i < nAttemptCount; i++)
+      nBackoffMs = (long) (nBackoffMs * dMultiplier);
+    nBackoffMs = Math.min (nBackoffMs, aMaxBackoff.toMillis ());
+    return APBasicMetaManager.getTimestampMgr ().getCurrentDateTimeUTC ().plusNanos (nBackoffMs * 1_000_000L);
+  }
+
+  /**
+   * Calculate the next retry timestamp using exponential backoff (millisecond-typed overload).
    *
    * @param nAttemptCount
    *        The current attempt number (1-based). Must be &gt;= 0.
@@ -48,17 +76,19 @@ public final class BackoffCalculator
    * @param nMaxBackoffMs
    *        The maximum backoff duration in milliseconds. Must be &gt;= 0.
    * @return The calculated next retry timestamp. Never <code>null</code>.
+   * @deprecated Since 0.2.4; use
+   *             {@link #calculateNextRetry(int, Duration, double, Duration)} instead.
    */
   @NonNull
+  @Deprecated (forRemoval = true, since = "0.2.4")
   public static OffsetDateTime calculateNextRetry (@Nonnegative final int nAttemptCount,
                                                    @Nonnegative final long nInitialBackoffMs,
                                                    @Nonnegative final double dMultiplier,
                                                    @Nonnegative final long nMaxBackoffMs)
   {
-    long nBackoffMs = nInitialBackoffMs;
-    for (int i = 1; i < nAttemptCount; i++)
-      nBackoffMs = (long) (nBackoffMs * dMultiplier);
-    nBackoffMs = Math.min (nBackoffMs, nMaxBackoffMs);
-    return APBasicMetaManager.getTimestampMgr ().getCurrentDateTimeUTC ().plusNanos (nBackoffMs * 1_000_000L);
+    return calculateNextRetry (nAttemptCount,
+                               Duration.ofMillis (nInitialBackoffMs),
+                               dMultiplier,
+                               Duration.ofMillis (nMaxBackoffMs));
   }
 }

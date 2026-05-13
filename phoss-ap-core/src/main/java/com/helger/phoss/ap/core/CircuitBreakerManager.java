@@ -16,7 +16,6 @@
  */
 package com.helger.phoss.ap.core;
 
-import java.time.Duration;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.jspecify.annotations.NonNull;
@@ -49,7 +48,7 @@ public final class CircuitBreakerManager
       LOGGER.info ("Creating circuit breaker for '" + k + "'");
       return CircuitBreaker.<Void> builder ()
                            .withFailureThreshold (APCoreConfig.getCircuitBreakerFailureThreshold ())
-                           .withDelay (Duration.ofMillis (APCoreConfig.getCircuitBreakerOpenDurationMs ()))
+                           .withDelay (APCoreConfig.getCircuitBreakerOpenDuration ())
                            .withSuccessThreshold (APCoreConfig.getCircuitBreakerHalfOpenMaxAttempts ())
                            .onOpen (e -> LOGGER.info ("The circuit breaker for '" + k + "' was opened"))
                            .onClose (e -> LOGGER.info ("The circuit breaker for '" + k + "' was closed"))
