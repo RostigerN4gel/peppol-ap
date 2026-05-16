@@ -12,6 +12,6 @@ zz
 *.p12
 
 # Local Grafana testing
-container/
-.env
+lgtm-container/
+.lgtm-env
 run-lgtm.sh
