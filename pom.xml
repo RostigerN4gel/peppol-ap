@@ -62,8 +62,8 @@
     <jaxb-impl.version>4.0.8</jaxb-impl.version>
     <log4j.version>2.26.0</log4j.version>
     <mysql.version>9.7.0</mysql.version>
-    <opentelemetry.version>1.52.0</opentelemetry.version>
-    <opentelemetry-instrumentation.version>2.18.0</opentelemetry-instrumentation.version>
+    <opentelemetry.version>1.62.0</opentelemetry.version>
+    <opentelemetry-instrumentation.version>2.27.0</opentelemetry-instrumentation.version>
     <postgres.version>42.7.11</postgres.version>
     <sentry.version>8.41.0</sentry.version>
     <spring-boot.version>4.0.6</spring-boot.version>
@@ -71,7 +71,7 @@
     <ph-commons.version>12.2.5</ph-commons.version>
     <ph-db.version>8.4.0</ph-db.version>
     <ph-web.version>11.4.0</ph-web.version>
-    <ph-oton.version>10.2.2</ph-oton.version>
+    <ph-oton.version>10.2.3</ph-oton.version>
     <peppol-commons.version>12.5.0</peppol-commons.version>
     <phive.version>12.0.3</phive.version>
     <phase4.version>4.5.0</phase4.version>
