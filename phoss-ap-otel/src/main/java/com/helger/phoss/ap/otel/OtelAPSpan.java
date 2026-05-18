@@ -19,21 +19,21 @@ package com.helger.phoss.ap.otel;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
-import com.helger.phoss.ap.api.trace.IAPSpan;
+import com.helger.telemetry.ITelemetrySpan;
 
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.StatusCode;
 import io.opentelemetry.context.Scope;
 
 /**
- * {@link IAPSpan} backed by an OpenTelemetry {@link Span} that has been made the current span on
- * the calling thread via {@link Span#makeCurrent()}. The returned {@link Scope} is kept inside this
- * wrapper and closed together with the span on <code>close()</code>.
+ * {@link ITelemetrySpan} backed by an OpenTelemetry {@link Span} that has been made the current
+ * span on the calling thread via {@link Span#makeCurrent()}. The returned {@link Scope} is kept
+ * inside this wrapper and closed together with the span on <code>close()</code>.
  *
  * @author Philip Helger
  * @since 0.9.0
  */
-final class OtelAPSpan implements IAPSpan
+final class OtelAPSpan implements ITelemetrySpan
 {
   private final Span m_aSpan;
   private final Scope m_aScope;
@@ -46,7 +46,7 @@ final class OtelAPSpan implements IAPSpan
   }
 
   @NonNull
-  public IAPSpan setAttribute (@NonNull final String sKey, @Nullable final String sValue)
+  public ITelemetrySpan setAttribute (@NonNull final String sKey, @Nullable final String sValue)
   {
     if (sValue != null)
       m_aSpan.setAttribute (sKey, sValue);
@@ -54,42 +54,42 @@ final class OtelAPSpan implements IAPSpan
   }
 
   @NonNull
-  public IAPSpan setAttribute (@NonNull final String sKey, final boolean bValue)
+  public ITelemetrySpan setAttribute (@NonNull final String sKey, final boolean bValue)
   {
     m_aSpan.setAttribute (sKey, bValue);
     return this;
   }
 
   @NonNull
-  public IAPSpan setAttribute (@NonNull final String sKey, final long nValue)
+  public ITelemetrySpan setAttribute (@NonNull final String sKey, final long nValue)
   {
     m_aSpan.setAttribute (sKey, nValue);
     return this;
   }
 
   @NonNull
-  public IAPSpan setAttribute (@NonNull final String sKey, final double dValue)
+  public ITelemetrySpan setAttribute (@NonNull final String sKey, final double dValue)
   {
     m_aSpan.setAttribute (sKey, dValue);
     return this;
   }
 
   @NonNull
-  public IAPSpan recordException (@NonNull final Throwable aException)
+  public ITelemetrySpan recordException (@NonNull final Throwable aException)
   {
     m_aSpan.recordException (aException);
     return this;
   }
 
   @NonNull
-  public IAPSpan setStatusOk ()
+  public ITelemetrySpan setStatusOk ()
   {
     m_aSpan.setStatus (StatusCode.OK);
     return this;
   }
 
   @NonNull
-  public IAPSpan setStatusError (@Nullable final String sMessage)
+  public ITelemetrySpan setStatusError (@Nullable final String sMessage)
   {
     if (sMessage != null)
       m_aSpan.setStatus (StatusCode.ERROR, sMessage);

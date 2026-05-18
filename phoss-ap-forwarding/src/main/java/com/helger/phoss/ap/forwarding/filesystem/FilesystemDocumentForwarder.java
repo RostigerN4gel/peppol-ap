@@ -45,8 +45,8 @@ import com.helger.phoss.ap.api.mgr.IDocumentPayloadManager;
 import com.helger.phoss.ap.api.model.ForwardingResult;
 import com.helger.phoss.ap.api.model.IInboundTransaction;
 import com.helger.phoss.ap.api.otel.CPhossAPOtel;
-import com.helger.phoss.ap.api.trace.APTrace;
-import com.helger.phoss.ap.api.trace.EAPSpanKind;
+import com.helger.telemetry.Telemetry;
+import com.helger.telemetry.ETelemetrySpanKind;
 import com.helger.phoss.ap.basic.APBasicMetaManager;
 
 /**
@@ -71,8 +71,7 @@ public class FilesystemDocumentForwarder implements IDocumentForwarder
 
   /** {@inheritDoc} */
   @NonNull
-  public ESuccess initFromConfiguration (@NonNull final IConfigWithFallback aConfig,
-                                         @NonNull final String sKeyPrefix)
+  public ESuccess initFromConfiguration (@NonNull final IConfigWithFallback aConfig, @NonNull final String sKeyPrefix)
   {
     ValueEnforcer.notNull (sKeyPrefix, "KeyPrefix");
 
@@ -217,7 +216,7 @@ public class FilesystemDocumentForwarder implements IDocumentForwarder
   @NonNull
   public ForwardingResult forwardDocument (@NonNull final IInboundTransaction aTransaction)
   {
-    return APTrace.withSpan (CPhossAPOtel.SPAN_FORWARDER_DISPATCH, EAPSpanKind.CLIENT, aSpan -> {
+    return Telemetry.withSpan (CPhossAPOtel.SPAN_FORWARDER_DISPATCH, ETelemetrySpanKind.CLIENT, aSpan -> {
       aSpan.setAttribute (CPhossAPOtel.ATTR_FORWARDER_TYPE, "filesystem")
            .setAttribute (CPhossAPOtel.ATTR_TRANSACTION_ID, aTransaction.getID ());
       return _doForwardDocument (aTransaction);

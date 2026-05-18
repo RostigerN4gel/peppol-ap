@@ -21,9 +21,9 @@ import org.jspecify.annotations.NonNull;
 import com.helger.annotation.style.IsSPIImplementation;
 import com.helger.phoss.ap.api.CPhossAPVersion;
 import com.helger.phoss.ap.api.otel.CPhossAPOtel;
-import com.helger.phoss.ap.api.trace.EAPSpanKind;
-import com.helger.phoss.ap.api.trace.IAPSpan;
-import com.helger.phoss.ap.api.trace.IAPTracerSPI;
+import com.helger.telemetry.ETelemetrySpanKind;
+import com.helger.telemetry.ITelemetrySpan;
+import com.helger.telemetry.ITelemetryTracerSPI;
 
 import io.opentelemetry.api.GlobalOpenTelemetry;
 import io.opentelemetry.api.trace.Span;
@@ -33,7 +33,7 @@ import io.opentelemetry.api.trace.Tracer;
 
 /**
  * Registered via {@link java.util.ServiceLoader} (see
- * {@code META-INF/services/com.helger.phoss.ap.api.trace.IAPTracerSPI}). Resolves the OpenTelemetry
+ * {@code META-INF/services/com.helger.telemetry.ITelemetryTracerSPI}). Resolves the OpenTelemetry
  * {@link Tracer} from {@link GlobalOpenTelemetry} on first use and starts a new active span per
  * call.
  * <p>
@@ -46,7 +46,7 @@ import io.opentelemetry.api.trace.Tracer;
  * @since 0.9.0
  */
 @IsSPIImplementation
-public final class OtelAPTracerSPI implements IAPTracerSPI
+public final class OtelAPTracerSPI implements ITelemetryTracerSPI
 {
   private static volatile Tracer s_aTracer;
 
@@ -67,7 +67,7 @@ public final class OtelAPTracerSPI implements IAPTracerSPI
   }
 
   @NonNull
-  private static SpanKind _toOtelKind (@NonNull final EAPSpanKind eKind)
+  private static SpanKind _toOtelKind (@NonNull final ETelemetrySpanKind eKind)
   {
     return switch (eKind)
     {
@@ -80,7 +80,7 @@ public final class OtelAPTracerSPI implements IAPTracerSPI
   }
 
   @NonNull
-  public IAPSpan startSpan (@NonNull final String sName, @NonNull final EAPSpanKind eKind)
+  public ITelemetrySpan startSpan (@NonNull final String sName, @NonNull final ETelemetrySpanKind eKind)
   {
     final SpanBuilder aBuilder = _tracer ().spanBuilder (sName).setSpanKind (_toOtelKind (eKind));
     final Span aSpan = aBuilder.startSpan ();

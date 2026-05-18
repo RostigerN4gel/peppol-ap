@@ -37,9 +37,9 @@ import com.helger.phoss.ap.api.model.IInboundTransaction;
 import com.helger.phoss.ap.api.model.MlsOutcome;
 import com.helger.phoss.ap.api.model.MlsOutcomeIssue;
 import com.helger.phoss.ap.api.otel.CPhossAPOtel;
-import com.helger.phoss.ap.api.trace.APTrace;
-import com.helger.phoss.ap.api.trace.EAPSpanKind;
-import com.helger.phoss.ap.api.trace.IAPSpan;
+import com.helger.telemetry.Telemetry;
+import com.helger.telemetry.ETelemetrySpanKind;
+import com.helger.telemetry.ITelemetrySpan;
 import com.helger.phoss.ap.basic.APBasicMetaManager;
 import com.helger.phoss.ap.core.APCoreConfig;
 import com.helger.phoss.ap.core.APCoreMetaManager;
@@ -83,11 +83,13 @@ public final class InboundOrchestrator
     final IAPTimestampManager aTimestampMgr = APBasicMetaManager.getTimestampMgr ();
 
     boolean bForwardSuccess = false;
-    try (final IAPSpan aSpan = APTrace.startSpan (CPhossAPOtel.SPAN_INBOUND_FORWARD, EAPSpanKind.PRODUCER)
-                                      .setAttribute (CPhossAPOtel.ATTR_TRANSACTION_ID, aInboundTx.getID ())
-                                      .setAttribute (CPhossAPOtel.ATTR_SBDH_INSTANCE_ID,
-                                                     aInboundTx.getSbdhInstanceID ())
-                                      .setAttribute (CPhossAPOtel.ATTR_IS_RETRY, aInboundTx.getAttemptCount () > 0))
+    try (final ITelemetrySpan aSpan = Telemetry.startSpan (CPhossAPOtel.SPAN_INBOUND_FORWARD,
+                                                           ETelemetrySpanKind.PRODUCER)
+                                               .setAttribute (CPhossAPOtel.ATTR_TRANSACTION_ID, aInboundTx.getID ())
+                                               .setAttribute (CPhossAPOtel.ATTR_SBDH_INSTANCE_ID,
+                                                              aInboundTx.getSbdhInstanceID ())
+                                               .setAttribute (CPhossAPOtel.ATTR_IS_RETRY,
+                                                              aInboundTx.getAttemptCount () > 0))
     {
       try
       {
@@ -160,15 +162,15 @@ public final class InboundOrchestrator
             String sC4CountryCode = aResult.getCountryCodeC4 ();
             if (sC4CountryCode == null)
             {
-              sC4CountryCode = APTrace.withSpan (CPhossAPOtel.SPAN_INBOUND_C4_RESOLVE,
-                                                 EAPSpanKind.INTERNAL,
-                                                 aResolveSpan -> {
-                                                   aResolveSpan.setAttribute (CPhossAPOtel.ATTR_TRANSACTION_ID,
-                                                                              aInboundTx.getID ())
-                                                               .setAttribute (CPhossAPOtel.ATTR_RECEIVER_ID,
-                                                                              aInboundTx.getReceiverID ());
-                                                   return C4CountryCodeResolver.resolve (aInboundTx);
-                                                 });
+              sC4CountryCode = Telemetry.withSpan (CPhossAPOtel.SPAN_INBOUND_C4_RESOLVE,
+                                                   ETelemetrySpanKind.INTERNAL,
+                                                   aResolveSpan -> {
+                                                     aResolveSpan.setAttribute (CPhossAPOtel.ATTR_TRANSACTION_ID,
+                                                                                aInboundTx.getID ())
+                                                                 .setAttribute (CPhossAPOtel.ATTR_RECEIVER_ID,
+                                                                                aInboundTx.getReceiverID ());
+                                                     return C4CountryCodeResolver.resolve (aInboundTx);
+                                                   });
             }
 
             if (sC4CountryCode != null)
@@ -194,13 +196,14 @@ public final class InboundOrchestrator
                 for (final IDocumentForwarder aSecondary : aSecondaryForwarders)
                 {
                   nIndex++;
-                  try (final IAPSpan aSecSpan = APTrace.startSpan (CPhossAPOtel.SPAN_INBOUND_FORWARD_SECONDARY,
-                                                                   EAPSpanKind.PRODUCER)
-                                                       .setAttribute (CPhossAPOtel.ATTR_TRANSACTION_ID,
-                                                                      aInboundTx.getID ())
-                                                       .setAttribute (CPhossAPOtel.ATTR_SBDH_INSTANCE_ID,
-                                                                      aInboundTx.getSbdhInstanceID ())
-                                                       .setAttribute (CPhossAPOtel.ATTR_FORWARDER_INDEX, nIndex))
+                  try (final ITelemetrySpan aSecSpan = Telemetry.startSpan (CPhossAPOtel.SPAN_INBOUND_FORWARD_SECONDARY,
+                                                                            ETelemetrySpanKind.PRODUCER)
+                                                                .setAttribute (CPhossAPOtel.ATTR_TRANSACTION_ID,
+                                                                               aInboundTx.getID ())
+                                                                .setAttribute (CPhossAPOtel.ATTR_SBDH_INSTANCE_ID,
+                                                                               aInboundTx.getSbdhInstanceID ())
+                                                                .setAttribute (CPhossAPOtel.ATTR_FORWARDER_INDEX,
+                                                                               nIndex))
                   {
                     try
                     {

@@ -41,8 +41,8 @@ public interface IDocumentForwarder
   String DEFAULT_CONFIG_KEY_PREFIX = "forwarding.";
 
   /**
-   * Initialize the forwarder from the provided configuration using the default
-   * "forwarding." key prefix.
+   * Initialize the forwarder from the provided configuration using the default "forwarding." key
+   * prefix.
    *
    * @param aConfig
    *        The configuration object to init from. Never <code>null</code>.

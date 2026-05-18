@@ -57,8 +57,8 @@ import com.helger.phase4.peppol.Phase4PeppolSendingReport;
 import com.helger.phoss.ap.api.config.APConfigProvider;
 import com.helger.phoss.ap.api.model.IOutboundTransaction;
 import com.helger.phoss.ap.api.otel.CPhossAPOtel;
-import com.helger.phoss.ap.api.trace.APTrace;
-import com.helger.phoss.ap.api.trace.EAPSpanKind;
+import com.helger.telemetry.Telemetry;
+import com.helger.telemetry.ETelemetrySpanKind;
 import com.helger.phoss.ap.basic.APBasicMetaManager;
 import com.helger.phoss.ap.core.APCoreConfig;
 import com.helger.phoss.ap.core.APCoreMetaManager;
@@ -190,7 +190,7 @@ public final class APPeppolReportHelper
   {
     ValueEnforcer.notNull (aYearMonth, "YearMonth");
 
-    return APTrace.withSpan (CPhossAPOtel.SPAN_REPORTING_TSR, EAPSpanKind.PRODUCER, aSpan -> {
+    return Telemetry.withSpan (CPhossAPOtel.SPAN_REPORTING_TSR, ETelemetrySpanKind.PRODUCER, aSpan -> {
       aSpan.setAttribute (CPhossAPOtel.ATTR_REPORT_TYPE, "TSR")
            .setAttribute (CPhossAPOtel.ATTR_REPORT_YEAR_MONTH, aYearMonth.toString ());
       try
@@ -238,7 +238,7 @@ public final class APPeppolReportHelper
   {
     ValueEnforcer.notNull (aYearMonth, "YearMonth");
 
-    return APTrace.withSpan (CPhossAPOtel.SPAN_REPORTING_EUSR, EAPSpanKind.PRODUCER, aSpan -> {
+    return Telemetry.withSpan (CPhossAPOtel.SPAN_REPORTING_EUSR, ETelemetrySpanKind.PRODUCER, aSpan -> {
       aSpan.setAttribute (CPhossAPOtel.ATTR_REPORT_TYPE, "EUSR")
            .setAttribute (CPhossAPOtel.ATTR_REPORT_YEAR_MONTH, aYearMonth.toString ());
       try
@@ -339,7 +339,7 @@ public final class APPeppolReportHelper
       final PeppolReportingSupport aPRS = new PeppolReportingSupport (aReportingStorage);
 
       // Handle TSR
-      bTSRSuccess = APTrace.withSpan (CPhossAPOtel.SPAN_REPORTING_TSR, EAPSpanKind.PRODUCER, aSpan -> {
+      bTSRSuccess = Telemetry.withSpan (CPhossAPOtel.SPAN_REPORTING_TSR, ETelemetrySpanKind.PRODUCER, aSpan -> {
         aSpan.setAttribute (CPhossAPOtel.ATTR_REPORT_TYPE, "TSR")
              .setAttribute (CPhossAPOtel.ATTR_REPORT_YEAR_MONTH, aYearMonth.toString ());
         try
@@ -353,15 +353,14 @@ public final class APPeppolReportHelper
             return Boolean.FALSE;
           }
           final Wrapper <String> aTSRString = new Wrapper <> ();
-          if (APTrace.withSpan (CPhossAPOtel.SPAN_REPORTING_TSR_VALIDATE_STORE,
-                                EAPSpanKind.INTERNAL,
-                                aChildSpan -> {
-                                  aChildSpan.setAttribute (CPhossAPOtel.ATTR_REPORT_TYPE, "TSR")
-                                            .setAttribute (CPhossAPOtel.ATTR_REPORT_YEAR_MONTH,
-                                                           aYearMonth.toString ());
-                                  return aPRS.validateAndStorePeppolTSR10 (aTSR, aTSRString::set);
-                                })
-                     .isFailure ())
+          if (Telemetry.withSpan (CPhossAPOtel.SPAN_REPORTING_TSR_VALIDATE_STORE,
+                                  ETelemetrySpanKind.INTERNAL,
+                                  aChildSpan -> {
+                                    aChildSpan.setAttribute (CPhossAPOtel.ATTR_REPORT_TYPE, "TSR")
+                                              .setAttribute (CPhossAPOtel.ATTR_REPORT_YEAR_MONTH,
+                                                             aYearMonth.toString ());
+                                    return aPRS.validateAndStorePeppolTSR10 (aTSR, aTSRString::set);
+                                  }).isFailure ())
           {
             LOGGER.error ("Failed to validate and store TSR for " + aYearMonth);
             return Boolean.FALSE;
@@ -398,7 +397,7 @@ public final class APPeppolReportHelper
       }
 
       // Handle EUSR
-      bEUSRSuccess = APTrace.withSpan (CPhossAPOtel.SPAN_REPORTING_EUSR, EAPSpanKind.PRODUCER, aSpan -> {
+      bEUSRSuccess = Telemetry.withSpan (CPhossAPOtel.SPAN_REPORTING_EUSR, ETelemetrySpanKind.PRODUCER, aSpan -> {
         aSpan.setAttribute (CPhossAPOtel.ATTR_REPORT_TYPE, "EUSR")
              .setAttribute (CPhossAPOtel.ATTR_REPORT_YEAR_MONTH, aYearMonth.toString ());
         try
@@ -412,15 +411,14 @@ public final class APPeppolReportHelper
             return Boolean.FALSE;
           }
           final Wrapper <String> aEUSRString = new Wrapper <> ();
-          if (APTrace.withSpan (CPhossAPOtel.SPAN_REPORTING_EUSR_VALIDATE_STORE,
-                                EAPSpanKind.INTERNAL,
-                                aChildSpan -> {
-                                  aChildSpan.setAttribute (CPhossAPOtel.ATTR_REPORT_TYPE, "EUSR")
-                                            .setAttribute (CPhossAPOtel.ATTR_REPORT_YEAR_MONTH,
-                                                           aYearMonth.toString ());
-                                  return aPRS.validateAndStorePeppolEUSR11 (aEUSR, aEUSRString::set);
-                                })
-                     .isFailure ())
+          if (Telemetry.withSpan (CPhossAPOtel.SPAN_REPORTING_EUSR_VALIDATE_STORE,
+                                  ETelemetrySpanKind.INTERNAL,
+                                  aChildSpan -> {
+                                    aChildSpan.setAttribute (CPhossAPOtel.ATTR_REPORT_TYPE, "EUSR")
+                                              .setAttribute (CPhossAPOtel.ATTR_REPORT_YEAR_MONTH,
+                                                             aYearMonth.toString ());
+                                    return aPRS.validateAndStorePeppolEUSR11 (aEUSR, aEUSRString::set);
+                                  }).isFailure ())
           {
             LOGGER.error ("Failed to validate and store EUSR for " + aYearMonth);
             return Boolean.FALSE;

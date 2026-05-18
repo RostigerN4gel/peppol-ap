@@ -162,8 +162,8 @@ public interface IInboundTransactionManager
 
   /**
    * Look up a transaction by its SBDH Instance Identifier, searching both the active
-   * {@code inbound_transaction} table and the {@code inbound_transaction_archive} table. The
-   * active table is queried first; the archive table is only consulted if no match is found there.
+   * {@code inbound_transaction} table and the {@code inbound_transaction_archive} table. The active
+   * table is queried first; the archive table is only consulted if no match is found there.
    *
    * @param sSbdhInstanceID
    *        The SBDH Instance Identifier. Never <code>null</code>.

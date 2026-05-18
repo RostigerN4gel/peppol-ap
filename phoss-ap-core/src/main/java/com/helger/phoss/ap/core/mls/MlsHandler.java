@@ -48,9 +48,9 @@ import com.helger.phoss.ap.api.model.IInboundTransaction;
 import com.helger.phoss.ap.api.model.IOutboundTransaction;
 import com.helger.phoss.ap.api.model.MlsOutcome;
 import com.helger.phoss.ap.api.otel.CPhossAPOtel;
-import com.helger.phoss.ap.api.trace.APTrace;
-import com.helger.phoss.ap.api.trace.EAPSpanKind;
-import com.helger.phoss.ap.api.trace.IAPSpan;
+import com.helger.telemetry.Telemetry;
+import com.helger.telemetry.ETelemetrySpanKind;
+import com.helger.telemetry.ITelemetrySpan;
 import com.helger.phoss.ap.basic.APBasicConfig;
 import com.helger.phoss.ap.basic.APBasicMetaManager;
 import com.helger.phoss.ap.core.APCoreConfig;
@@ -95,12 +95,12 @@ public final class MlsHandler
       return ESuccess.SUCCESS;
     }
 
-    try (final IAPSpan aSpan = APTrace.startSpan (CPhossAPOtel.SPAN_MLS_SEND, EAPSpanKind.PRODUCER)
-                                      .setAttribute (CPhossAPOtel.ATTR_TRANSACTION_ID, aInboundTx.getID ())
-                                      .setAttribute (CPhossAPOtel.ATTR_SBDH_INSTANCE_ID,
-                                                     aInboundTx.getSbdhInstanceID ())
-                                      .setAttribute (CPhossAPOtel.ATTR_MLS_RESPONSE_CODE,
-                                                     aOutcome.getResponseCode ().getID ()))
+    try (final ITelemetrySpan aSpan = Telemetry.startSpan (CPhossAPOtel.SPAN_MLS_SEND, ETelemetrySpanKind.PRODUCER)
+                                               .setAttribute (CPhossAPOtel.ATTR_TRANSACTION_ID, aInboundTx.getID ())
+                                               .setAttribute (CPhossAPOtel.ATTR_SBDH_INSTANCE_ID,
+                                                              aInboundTx.getSbdhInstanceID ())
+                                               .setAttribute (CPhossAPOtel.ATTR_MLS_RESPONSE_CODE,
+                                                              aOutcome.getResponseCode ().getID ()))
     {
       final IAPTimestampManager aTimestampMgr = APBasicMetaManager.getTimestampMgr ();
       final IIdentifierFactory aIF = APBasicMetaManager.getIdentifierFactory ();

@@ -72,9 +72,9 @@ import com.helger.phoss.ap.api.mgr.IDocumentPayloadManager;
 import com.helger.phoss.ap.api.model.IOutboundTransaction;
 import com.helger.phoss.ap.api.otel.CPhossAPOtel;
 import com.helger.phoss.ap.api.spi.IOutboundDocumentVerifierSPI;
-import com.helger.phoss.ap.api.trace.APTrace;
-import com.helger.phoss.ap.api.trace.EAPSpanKind;
-import com.helger.phoss.ap.api.trace.IAPSpan;
+import com.helger.telemetry.Telemetry;
+import com.helger.telemetry.ETelemetrySpanKind;
+import com.helger.telemetry.ITelemetrySpan;
 import com.helger.phoss.ap.basic.APBasicConfig;
 import com.helger.phoss.ap.basic.APBasicMetaManager;
 import com.helger.phoss.ap.core.APCoreConfig;
@@ -218,9 +218,11 @@ public final class OutboundOrchestrator
     // Optional verification
     if (APCoreConfig.isVerificationOutboundEnabled ())
     {
-      try (final IAPSpan aVerifySpan = APTrace.startSpan (CPhossAPOtel.SPAN_VERIFICATION, EAPSpanKind.INTERNAL)
-                                              .setAttribute (CPhossAPOtel.ATTR_IS_OUTBOUND, true)
-                                              .setAttribute (CPhossAPOtel.ATTR_SBDH_INSTANCE_ID, sSbdhInstanceID))
+      try (final ITelemetrySpan aVerifySpan = Telemetry.startSpan (CPhossAPOtel.SPAN_VERIFICATION,
+                                                                   ETelemetrySpanKind.INTERNAL)
+                                                       .setAttribute (CPhossAPOtel.ATTR_IS_OUTBOUND, true)
+                                                       .setAttribute (CPhossAPOtel.ATTR_SBDH_INSTANCE_ID,
+                                                                      sSbdhInstanceID))
       {
         for (final IOutboundDocumentVerifierSPI aVerifier : APCoreMetaManager.getAllOutboundVerifiers ())
           if (aVerifier.verifyOutboundDocument (sDocumentPath, aDocTypeID, aProcessID).isFailure ())
@@ -348,9 +350,11 @@ public final class OutboundOrchestrator
     {
       final IDocumentTypeIdentifier aDocTypeID = aSbdData.getDocumentTypeAsIdentifier ();
       final IProcessIdentifier aProcessID = aSbdData.getProcessAsIdentifier ();
-      try (final IAPSpan aVerifySpan = APTrace.startSpan (CPhossAPOtel.SPAN_VERIFICATION, EAPSpanKind.INTERNAL)
-                                              .setAttribute (CPhossAPOtel.ATTR_IS_OUTBOUND, true)
-                                              .setAttribute (CPhossAPOtel.ATTR_SBDH_INSTANCE_ID, sSbdhInstanceID))
+      try (final ITelemetrySpan aVerifySpan = Telemetry.startSpan (CPhossAPOtel.SPAN_VERIFICATION,
+                                                                   ETelemetrySpanKind.INTERNAL)
+                                                       .setAttribute (CPhossAPOtel.ATTR_IS_OUTBOUND, true)
+                                                       .setAttribute (CPhossAPOtel.ATTR_SBDH_INSTANCE_ID,
+                                                                      sSbdhInstanceID))
       {
         for (final IOutboundDocumentVerifierSPI aVerifier : APCoreMetaManager.getAllOutboundVerifiers ())
           if (aVerifier.verifyOutboundDocument (sDocumentPath, aDocTypeID, aProcessID).isFailure ())
@@ -445,13 +449,14 @@ public final class OutboundOrchestrator
     LOGGER.info (sRealLogPrefix + "Processing outbound transaction");
     Phase4LogCustomizer.setThreadLocalLogPrefix (sRealLogPrefix);
 
-    try (final IAPSpan aSpan = APTrace.startSpan (CPhossAPOtel.SPAN_OUTBOUND_SEND, EAPSpanKind.PRODUCER)
-                                      .setAttribute (CPhossAPOtel.ATTR_TRANSACTION_ID, sTxID)
-                                      .setAttribute (CPhossAPOtel.ATTR_SBDH_INSTANCE_ID, aTx.getSbdhInstanceID ())
-                                      .setAttribute (CPhossAPOtel.ATTR_SENDER_ID, aTx.getSenderID ())
-                                      .setAttribute (CPhossAPOtel.ATTR_RECEIVER_ID, aTx.getReceiverID ())
-                                      .setAttribute (CPhossAPOtel.ATTR_DOCTYPE_ID, aTx.getDocTypeID ())
-                                      .setAttribute (CPhossAPOtel.ATTR_PROCESS_ID, aTx.getProcessID ()))
+    try (final ITelemetrySpan aSpan = Telemetry.startSpan (CPhossAPOtel.SPAN_OUTBOUND_SEND, ETelemetrySpanKind.PRODUCER)
+                                               .setAttribute (CPhossAPOtel.ATTR_TRANSACTION_ID, sTxID)
+                                               .setAttribute (CPhossAPOtel.ATTR_SBDH_INSTANCE_ID,
+                                                              aTx.getSbdhInstanceID ())
+                                               .setAttribute (CPhossAPOtel.ATTR_SENDER_ID, aTx.getSenderID ())
+                                               .setAttribute (CPhossAPOtel.ATTR_RECEIVER_ID, aTx.getReceiverID ())
+                                               .setAttribute (CPhossAPOtel.ATTR_DOCTYPE_ID, aTx.getDocTypeID ())
+                                               .setAttribute (CPhossAPOtel.ATTR_PROCESS_ID, aTx.getProcessID ()))
     {
       // try-catch for overall duration only
       try
@@ -529,8 +534,10 @@ public final class OutboundOrchestrator
         String sReceiverTechnicalContactOut = null;
 
         boolean bSmpLookupSuccess = false;
-        try (final IAPSpan aSmpSpan = APTrace.startSpan (CPhossAPOtel.SPAN_SMP_LOOKUP, EAPSpanKind.CLIENT)
-                                             .setAttribute (CPhossAPOtel.ATTR_RECEIVER_ID, aTx.getReceiverID ()))
+        try (final ITelemetrySpan aSmpSpan = Telemetry.startSpan (CPhossAPOtel.SPAN_SMP_LOOKUP,
+                                                                  ETelemetrySpanKind.CLIENT)
+                                                      .setAttribute (CPhossAPOtel.ATTR_RECEIVER_ID,
+                                                                     aTx.getReceiverID ()))
         {
           try
           {
@@ -750,13 +757,13 @@ public final class OutboundOrchestrator
                   aBuilder.payload (HasInputStream.multiple ( () -> aDocPayloadMgr.openDocumentStreamForRead (aTx.getDocumentPath ())));
                 }
 
-                eResult = APTrace.withSpan (CPhossAPOtel.SPAN_OUTBOUND_AS4_SEND,
-                                            EAPSpanKind.CLIENT,
-                                            aSendSpan -> {
-                                              aSendSpan.setAttribute (CPhossAPOtel.ATTR_RECEIVER_ID,
-                                                                      aTx.getReceiverID ());
-                                              return aBuilder.sendMessageAndCheckForReceipt (aCaughtSendingEx::set);
-                                            });
+                eResult = Telemetry.withSpan (CPhossAPOtel.SPAN_OUTBOUND_AS4_SEND,
+                                              ETelemetrySpanKind.CLIENT,
+                                              aSendSpan -> {
+                                                aSendSpan.setAttribute (CPhossAPOtel.ATTR_RECEIVER_ID,
+                                                                        aTx.getReceiverID ());
+                                                return aBuilder.sendMessageAndCheckForReceipt (aCaughtSendingEx::set);
+                                              });
                 aSendingReport.setAS4SendingResult (eResult);
                 LOGGER.info (sRealLogPrefix + "Peppol SBDH-building client send result: " + eResult);
 
@@ -767,9 +774,9 @@ public final class OutboundOrchestrator
               {
                 final PeppolSBDHData aSbdData;
                 final MessageDigest aMD = HashHelper.createMessageDigest ();
-                try (final IAPSpan aSbdhSpan = APTrace.startSpan (CPhossAPOtel.SPAN_OUTBOUND_SBDH_READ,
-                                                                  EAPSpanKind.INTERNAL)
-                                                      .setAttribute (CPhossAPOtel.ATTR_TRANSACTION_ID, sTxID))
+                try (final ITelemetrySpan aSbdhSpan = Telemetry.startSpan (CPhossAPOtel.SPAN_OUTBOUND_SBDH_READ,
+                                                                           ETelemetrySpanKind.INTERNAL)
+                                                               .setAttribute (CPhossAPOtel.ATTR_TRANSACTION_ID, sTxID))
                 {
                   boolean bSbdhReadSuccess = false;
                   try
@@ -843,13 +850,13 @@ public final class OutboundOrchestrator
                                              .signalMsgConsumer ( (aSignalMsg, aMessageMetadata, aState) -> {
                                                aSendingReport.setAS4ReceivedSignalMsg (aSignalMsg);
                                              });
-                eResult = APTrace.withSpan (CPhossAPOtel.SPAN_OUTBOUND_AS4_SEND,
-                                            EAPSpanKind.CLIENT,
-                                            aSendSpan -> {
-                                              aSendSpan.setAttribute (CPhossAPOtel.ATTR_RECEIVER_ID,
-                                                                      aTx.getReceiverID ());
-                                              return aBuilder.sendMessageAndCheckForReceipt (aCaughtSendingEx::set);
-                                            });
+                eResult = Telemetry.withSpan (CPhossAPOtel.SPAN_OUTBOUND_AS4_SEND,
+                                              ETelemetrySpanKind.CLIENT,
+                                              aSendSpan -> {
+                                                aSendSpan.setAttribute (CPhossAPOtel.ATTR_RECEIVER_ID,
+                                                                        aTx.getReceiverID ());
+                                                return aBuilder.sendMessageAndCheckForReceipt (aCaughtSendingEx::set);
+                                              });
                 aSendingReport.setAS4SendingResult (eResult);
                 LOGGER.info (sRealLogPrefix + "Peppol Prebuilt-SBDH client send result: " + eResult);
 

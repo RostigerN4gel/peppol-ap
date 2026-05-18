@@ -33,8 +33,8 @@ import com.helger.peppol.mls.EPeppolMLSResponseCode;
  * This SPI is the counterpart of {@link IAPNotificationHandlerSPI}, which carries
  * <em>failure</em>-side callbacks. The split is deliberate: handlers that target error trackers
  * (e.g. Sentry) implement only {@link IAPNotificationHandlerSPI}, while observability handlers
- * (e.g. OpenTelemetry) implement this interface to feed counters and histograms for throughput
- * and SLA dashboards.
+ * (e.g. OpenTelemetry) implement this interface to feed counters and histograms for throughput and
+ * SLA dashboards.
  * <p>
  * Implementations are loaded via {@link java.util.ServiceLoader}. Multiple handlers may be
  * registered.
@@ -120,8 +120,8 @@ public interface IAPLifecycleEventSPI
    * @param sSbdhInstanceID
    *        The SBDH Instance Identifier. Never <code>null</code>.
    * @param aForwardingDuration
-   *        The wall-clock duration from the original AS4 reception to the successful forwarding,
-   *        or <code>null</code> if the receive timestamp was not available.
+   *        The wall-clock duration from the original AS4 reception to the successful forwarding, or
+   *        <code>null</code> if the receive timestamp was not available.
    * @param bIsRetry
    *        <code>true</code> if the successful forwarding happened on a retry attempt,
    *        <code>false</code> on the first attempt.
@@ -132,8 +132,8 @@ public interface IAPLifecycleEventSPI
                                    boolean bIsRetry);
 
   /**
-   * Called when an outbound transaction has been accepted (document persisted, in
-   * {@code PENDING} state).
+   * Called when an outbound transaction has been accepted (document persisted, in {@code PENDING}
+   * state).
    *
    * @param sTransactionID
    *        The transaction ID. Never <code>null</code>.
@@ -198,8 +198,8 @@ public interface IAPLifecycleEventSPI
    * inbound batches have been processed).
    *
    * @param bIsOutbound
-   *        <code>true</code> for the outbound retry cycle, <code>false</code> for the inbound
-   *        retry cycle.
+   *        <code>true</code> for the outbound retry cycle, <code>false</code> for the inbound retry
+   *        cycle.
    * @param nProcessed
    *        Number of transactions actually attempted in this cycle. Always &gt;= 0.
    * @param aCycleDuration

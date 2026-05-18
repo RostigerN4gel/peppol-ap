@@ -63,9 +63,9 @@ import com.helger.phoss.ap.api.model.MlsOutcomeIssue;
 import com.helger.phoss.ap.api.otel.CPhossAPOtel;
 import com.helger.phoss.ap.api.spi.IInboundDocumentVerifierSPI;
 import com.helger.phoss.ap.api.spi.IPeppolReceiverCheckSPI;
-import com.helger.phoss.ap.api.trace.APTrace;
-import com.helger.phoss.ap.api.trace.EAPSpanKind;
-import com.helger.phoss.ap.api.trace.IAPSpan;
+import com.helger.telemetry.Telemetry;
+import com.helger.telemetry.ETelemetrySpanKind;
+import com.helger.telemetry.ITelemetrySpan;
 import com.helger.phoss.ap.basic.APBasicConfig;
 import com.helger.phoss.ap.basic.APBasicMetaManager;
 import com.helger.phoss.ap.core.APCoreConfig;
@@ -108,7 +108,8 @@ public class Phase4InboundMessageProcessorSPI implements IPhase4PeppolIncomingSB
     final String sLogPrefix = "[" + aMessageMetadata.getIncomingUniqueID () + "] ";
     Phase4LogCustomizer.setThreadLocalLogPrefix (sLogPrefix);
 
-    try (final IAPSpan aSpan = APTrace.startSpan (CPhossAPOtel.SPAN_INBOUND_RECEIVE, EAPSpanKind.CONSUMER))
+    try (final ITelemetrySpan aSpan = Telemetry.startSpan (CPhossAPOtel.SPAN_INBOUND_RECEIVE,
+                                                           ETelemetrySpanKind.CONSUMER))
     {
       try
       {
@@ -159,8 +160,8 @@ public class Phase4InboundMessageProcessorSPI implements IPhase4PeppolIncomingSB
         // Duplicate detection
         boolean bIsDuplicateAS4 = false;
         boolean bIsDuplicateSBDH = false;
-        try (final IAPSpan aDupSpan = APTrace.startSpan (CPhossAPOtel.SPAN_INBOUND_DUPLICATE_CHECK,
-                                                         EAPSpanKind.INTERNAL))
+        try (final ITelemetrySpan aDupSpan = Telemetry.startSpan (CPhossAPOtel.SPAN_INBOUND_DUPLICATE_CHECK,
+                                                                  ETelemetrySpanKind.INTERNAL))
         {
           if (aInboundMgr.containsByAS4MessageID (sAS4MessageID))
           {
@@ -321,10 +322,12 @@ public class Phase4InboundMessageProcessorSPI implements IPhase4PeppolIncomingSB
         // Optional verification
         if (APCoreConfig.isVerificationInboundEnabled ())
         {
-          try (final IAPSpan aVerifySpan = APTrace.startSpan (CPhossAPOtel.SPAN_VERIFICATION, EAPSpanKind.INTERNAL)
-                                                  .setAttribute (CPhossAPOtel.ATTR_IS_OUTBOUND, false)
-                                                  .setAttribute (CPhossAPOtel.ATTR_TRANSACTION_ID, sTxID)
-                                                  .setAttribute (CPhossAPOtel.ATTR_SBDH_INSTANCE_ID, sSbdhInstanceID))
+          try (final ITelemetrySpan aVerifySpan = Telemetry.startSpan (CPhossAPOtel.SPAN_VERIFICATION,
+                                                                       ETelemetrySpanKind.INTERNAL)
+                                                           .setAttribute (CPhossAPOtel.ATTR_IS_OUTBOUND, false)
+                                                           .setAttribute (CPhossAPOtel.ATTR_TRANSACTION_ID, sTxID)
+                                                           .setAttribute (CPhossAPOtel.ATTR_SBDH_INSTANCE_ID,
+                                                                          sSbdhInstanceID))
           {
             for (final IInboundDocumentVerifierSPI aVerifier : APCoreMetaManager.getAllInboundVerifiers ())
             {
@@ -396,7 +399,7 @@ public class Phase4InboundMessageProcessorSPI implements IPhase4PeppolIncomingSB
 
           // Correlate with the original outbound transaction and update its MLS
           // status
-          if (APTrace.withSpan (CPhossAPOtel.SPAN_MLS_CORRELATE, EAPSpanKind.INTERNAL, aCorrelateSpan -> {
+          if (Telemetry.withSpan (CPhossAPOtel.SPAN_MLS_CORRELATE, ETelemetrySpanKind.INTERNAL, aCorrelateSpan -> {
             aCorrelateSpan.setAttribute (CPhossAPOtel.ATTR_TRANSACTION_ID, sTxID)
                           .setAttribute (CPhossAPOtel.ATTR_SBDH_INSTANCE_ID, sSbdhInstanceID)
                           .setAttribute (CPhossAPOtel.ATTR_MLS_RESPONSE_CODE, aBuilder.responseCode ().getID ());

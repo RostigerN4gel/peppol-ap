@@ -34,12 +34,11 @@ import io.opentelemetry.api.metrics.Meter;
 
 /**
  * Central access point for the OpenTelemetry {@link Meter} and its cached instruments used by the
- * phoss AP. Tracing goes through the {@code com.helger.phoss.ap.api.trace} abstraction, not this
- * class.
+ * phoss AP. Tracing goes through the {@code com.helger.telemetry} abstraction, not this class.
  * <p>
- * By default, this class resolves the globally configured {@link OpenTelemetry} instance — which
- * is populated by the OTel SDK autoconfigure module when the application starts. For tests, a
- * custom {@link OpenTelemetry} may be installed via {@link #install(OpenTelemetry)}.
+ * By default, this class resolves the globally configured {@link OpenTelemetry} instance — which is
+ * populated by the OTel SDK autoconfigure module when the application starts. For tests, a custom
+ * {@link OpenTelemetry} may be installed via {@link #install(OpenTelemetry)}.
  * <p>
  * All instruments are created lazily on first access and cached for the lifetime of the JVM. Cache
  * reads use volatile, lock-free; cache population and {@link #install(OpenTelemetry)} go through a

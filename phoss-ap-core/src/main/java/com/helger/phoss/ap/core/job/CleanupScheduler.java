@@ -33,9 +33,9 @@ import com.helger.phoss.ap.api.config.APConfigurationProperties;
 import com.helger.phoss.ap.api.datetime.IAPTimestampManager;
 import com.helger.phoss.ap.api.mgr.IDocumentPayloadManager;
 import com.helger.phoss.ap.api.otel.CPhossAPOtel;
-import com.helger.phoss.ap.api.trace.APTrace;
-import com.helger.phoss.ap.api.trace.EAPSpanKind;
-import com.helger.phoss.ap.api.trace.IAPSpan;
+import com.helger.telemetry.Telemetry;
+import com.helger.telemetry.ETelemetrySpanKind;
+import com.helger.telemetry.ITelemetrySpan;
 import com.helger.phoss.ap.basic.APBasicMetaManager;
 import com.helger.phoss.ap.core.APCoreConfig;
 import com.helger.phoss.ap.core.APCoreMetaManager;
@@ -91,9 +91,10 @@ public final class CleanupScheduler
     final StopWatch aSW = StopWatch.createdStarted ();
     int nDeleted = 0;
 
-    try (final IAPSpan aSpan = APTrace.startSpan (CPhossAPOtel.SPAN_SCHEDULER_CYCLE, EAPSpanKind.INTERNAL)
-                                      .setAttribute (CPhossAPOtel.ATTR_SCHEDULER_NAME, "cleanup")
-                                      .setAttribute (CPhossAPOtel.ATTR_IS_OUTBOUND, true))
+    try (final ITelemetrySpan aSpan = Telemetry.startSpan (CPhossAPOtel.SPAN_SCHEDULER_CYCLE,
+                                                           ETelemetrySpanKind.INTERNAL)
+                                               .setAttribute (CPhossAPOtel.ATTR_SCHEDULER_NAME, "cleanup")
+                                               .setAttribute (CPhossAPOtel.ATTR_IS_OUTBOUND, true))
     {
       try
       {
@@ -131,9 +132,10 @@ public final class CleanupScheduler
     final StopWatch aSW = StopWatch.createdStarted ();
     int nDeleted = 0;
 
-    try (final IAPSpan aSpan = APTrace.startSpan (CPhossAPOtel.SPAN_SCHEDULER_CYCLE, EAPSpanKind.INTERNAL)
-                                      .setAttribute (CPhossAPOtel.ATTR_SCHEDULER_NAME, "cleanup")
-                                      .setAttribute (CPhossAPOtel.ATTR_IS_OUTBOUND, false))
+    try (final ITelemetrySpan aSpan = Telemetry.startSpan (CPhossAPOtel.SPAN_SCHEDULER_CYCLE,
+                                                           ETelemetrySpanKind.INTERNAL)
+                                               .setAttribute (CPhossAPOtel.ATTR_SCHEDULER_NAME, "cleanup")
+                                               .setAttribute (CPhossAPOtel.ATTR_IS_OUTBOUND, false))
     {
       try
       {

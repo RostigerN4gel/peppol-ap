@@ -52,7 +52,7 @@
     <maven.compiler.release>21</maven.compiler.release>
 
     <!-- External dependency versions -->
-    <awssdk.version>2.44.4</awssdk.version>
+    <awssdk.version>2.44.7</awssdk.version>
     <commons-compression.version>1.28.0</commons-compression.version>
     <commons-lang.version>3.20.0</commons-lang.version>
     <failsafe.version>3.3.2</failsafe.version>
@@ -68,7 +68,7 @@
     <sentry.version>8.41.0</sentry.version>
     <spring-boot.version>4.0.6</spring-boot.version>
 
-    <ph-commons.version>12.2.5</ph-commons.version>
+    <ph-commons.version>12.2.6</ph-commons.version>
     <ph-db.version>8.4.0</ph-db.version>
     <ph-web.version>11.4.0</ph-web.version>
     <ph-oton.version>10.2.3</ph-oton.version>
@@ -82,14 +82,6 @@
 
   <dependencyManagement>
     <dependencies>
-      <!-- overwrite ph-commons 12.2.0 to use 4.0.6 instead of 4.0.7 -->
-      <dependency>
-        <groupId>org.glassfish.jaxb</groupId>
-        <artifactId>jaxb-bom</artifactId>
-        <version>4.0.8</version>
-        <scope>import</scope>
-        <type>pom</type>
-      </dependency>
       <!-- BOM imports -->
       <dependency>
         <groupId>com.helger.commons</groupId>

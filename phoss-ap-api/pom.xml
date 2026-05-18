@@ -57,6 +57,10 @@
       <artifactId>ph-json</artifactId>
     </dependency>
     <dependency>
+      <groupId>com.helger.commons</groupId>
+      <artifactId>ph-telemetry</artifactId>
+    </dependency>
+    <dependency>
       <groupId>com.helger.peppol</groupId>
       <artifactId>peppol-sbdh</artifactId>
     </dependency>
