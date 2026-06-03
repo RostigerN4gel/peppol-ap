@@ -68,6 +68,7 @@
     <postgres.version>42.7.11</postgres.version>
     <sentry.version>8.43.0</sentry.version>
     <spring-boot.version>4.0.6</spring-boot.version>
+    <springdoc.version>3.0.3</springdoc.version>
     <sshd-sftp.version>2.18.0</sshd-sftp.version>
 
     <ph-commons.version>12.2.6</ph-commons.version>
