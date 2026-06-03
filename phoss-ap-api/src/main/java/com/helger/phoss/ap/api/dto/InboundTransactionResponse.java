@@ -22,31 +22,84 @@ import com.helger.json.IJsonObject;
 import com.helger.json.JsonObject;
 import com.helger.phoss.ap.api.model.IInboundTransaction;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
 /**
  * JSON response DTO representing an inbound transaction with all relevant fields for the REST API.
  * Usable both for server-side serialization and client-side deserialization.
  *
  * @author Philip Helger
  */
+@Schema (description = "Inbound (received) Peppol transaction — current state, identifiers, " +
+                       "forwarding outcome and MLS response status.")
 public class InboundTransactionResponse
 {
+  @Schema (description = "Internal transaction ID assigned by the AP")
   private String id;
+
+  @Schema (description = "Peppol Participant ID of the sender",
+           example = "iso6523-actorid-upis::0088:senderbackend")
   private String senderID;
+
+  @Schema (description = "Peppol Participant ID of the receiver",
+           example = "iso6523-actorid-upis::0088:receiverbackend")
   private String receiverID;
+
+  @Schema (description = "Peppol Document Type Identifier")
   private String docTypeID;
+
+  @Schema (description = "Peppol Process Identifier")
   private String processID;
+
+  @Schema (description = "AS4 Message ID from the inbound message")
   private String as4MessageID;
+
+  @Schema (description = "Peppol SBDH Instance Identifier",
+           example = "550e8400-e29b-41d4-a716-446655440000")
   private String sbdhInstanceID;
+
+  @Schema (description = "Current transaction status",
+           allowableValues = { "received", "rejected", "forwarding", "forwarded", "forward_failed",
+                               "permanently_failed" })
   private String status;
+
+  @Schema (description = "Total number of forwarding attempts")
   private int attemptCount;
+
+  @Schema (description = "When the message was received (ISO-8601, UTC)",
+           example = "2026-03-27T14:30:00Z")
   private String receivedDT;
+
+  @Schema (description = "When the transaction was successfully completed; null if not yet completed",
+           example = "2026-03-27T14:30:05Z",
+           nullable = true)
   private String completedDT;
+
+  @Schema (description = "Whether Peppol Reporting has been triggered",
+           allowableValues = { "pending", "reported" })
   private String reportingStatus;
+
+  @Schema (description = "Planned date/time of the next forwarding retry; null unless status is forward_failed",
+           nullable = true)
   private String nextRetryDT;
+
+  @Schema (description = "Summary error from the last failed forwarding attempt; null on success", nullable = true)
   private String errorDetails;
+
+  @Schema (description = "ISO 3166-1 alpha-2 country code of the final receiver (C4); null if not yet reported. Since v0.1.3.",
+           example = "AT",
+           nullable = true)
   private String c4CountryCode;
+
+  @Schema (description = "Duplicate detected on the AS4 Message ID level")
   private boolean isDuplicateAS4;
+
+  @Schema (description = "Duplicate detected on the SBDH Instance Identifier level")
   private boolean isDuplicateSBDH;
+
+  @Schema (description = "MLS response code sent or to be sent; null if not yet determined",
+           allowableValues = { "RE", "AP", "AB" },
+           nullable = true)
   private String mlsResponseCode;
 
   /**

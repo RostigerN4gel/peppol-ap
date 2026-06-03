@@ -20,28 +20,71 @@ import org.jspecify.annotations.NonNull;
 
 import com.helger.phoss.ap.api.model.IOutboundTransaction;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
 /**
  * JSON response DTO representing an outbound transaction with all relevant fields for the REST API.
  * Usable both for server-side serialization and client-side deserialization.
  *
  * @author Philip Helger
  */
+@Schema (description = "Outbound (sent) Peppol transaction — current state, identifiers, " +
+                       "transmission progress and MLS response status.")
 public class OutboundTransactionResponse
 {
+  @Schema (description = "Internal transaction ID assigned by the AP")
   private String id;
+
+  @Schema (description = "Kind of transaction", allowableValues = { "business_document", "mls_response" })
   private String transactionType;
+
+  @Schema (description = "Peppol Participant ID of the sender",
+           example = "iso6523-actorid-upis::0088:senderbackend")
   private String senderID;
+
+  @Schema (description = "Peppol Participant ID of the receiver",
+           example = "iso6523-actorid-upis::0088:receiverbackend")
   private String receiverID;
+
+  @Schema (description = "Peppol Document Type Identifier")
   private String docTypeID;
+
+  @Schema (description = "Peppol Process Identifier")
   private String processID;
+
+  @Schema (description = "Peppol SBDH Instance Identifier",
+           example = "550e8400-e29b-41d4-a716-446655440000")
   private String sbdhInstanceID;
+
+  @Schema (description = "Current transaction status",
+           allowableValues = { "pending", "rejected", "sending", "sent", "failed", "permanently_failed" })
   private String status;
+
+  @Schema (description = "Total number of sending attempts so far")
   private int attemptCount;
+
+  @Schema (description = "When the transaction was created (ISO-8601, UTC)", example = "2026-03-27T14:30:00Z")
   private String createdDT;
+
+  @Schema (description = "When the transaction was successfully completed; null if not yet completed",
+           example = "2026-03-27T14:30:05Z",
+           nullable = true)
   private String completedDT;
+
+  @Schema (description = "Whether Peppol Reporting has been triggered",
+           allowableValues = { "pending", "reported" })
   private String reportingStatus;
+
+  @Schema (description = "Planned date/time of the next sending retry; null unless status is failed",
+           nullable = true)
   private String nextRetryDT;
+
+  @Schema (description = "Summary error from the last failed sending attempt; null on success", nullable = true)
   private String errorDetails;
+
+  @Schema (description = "MLS response reception status (only for business_document)",
+           allowableValues = { "pending", "received_ap", "received_ab", "received_re", "not_applicable" },
+           nullable = true)
   private String mlsStatus;
 
   /**

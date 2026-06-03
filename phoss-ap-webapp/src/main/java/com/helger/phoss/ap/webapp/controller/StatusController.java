@@ -28,6 +28,10 @@ import com.helger.json.serialize.JsonWriterSettings;
 import com.helger.phoss.ap.core.APCoreConfig;
 import com.helger.phoss.ap.core.status.APStatusProvider;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.tags.Tag;
+
 /**
  * Management status endpoint providing non-sensitive configuration and version information as JSON.
  *
@@ -35,6 +39,8 @@ import com.helger.phoss.ap.core.status.APStatusProvider;
  */
 @RestController
 @RequestMapping ("/management")
+@Tag (name = "Management",
+      description = "Operational endpoints (not protected by the API token; restrict at a reverse proxy if needed).")
 public class StatusController
 {
   /**
@@ -42,6 +48,10 @@ public class StatusController
    *         disabled via configuration.
    */
   @GetMapping (path = "/status", produces = MediaType.APPLICATION_JSON_VALUE)
+  @Operation (summary = "Status, version and configuration overview",
+              description = "Returns non-sensitive configuration values, version information and runtime metadata. " +
+                            "When 'management.status.enabled=false' a minimal disabled indicator is returned instead.")
+  @ApiResponse (responseCode = "200", description = "Status JSON document")
   public ResponseEntity <String> getStatus ()
   {
     final IJsonObject aStatusData;

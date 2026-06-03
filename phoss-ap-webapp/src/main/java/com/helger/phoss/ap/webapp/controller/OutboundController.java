@@ -54,8 +54,16 @@ import com.helger.phoss.ap.core.APCoreConfig;
 import com.helger.phoss.ap.core.ddd.DDDHelper;
 import com.helger.phoss.ap.core.outbound.OutboundOrchestrator;
 import com.helger.phoss.ap.db.APJdbcMetaManager;
+import com.helger.phoss.ap.webapp.config.OpenApiConfig;
 import com.helger.xml.serialize.read.DOMReader;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
@@ -73,6 +81,8 @@ import software.amazon.awssdk.services.s3.model.GetObjectRequest;
  */
 @RestController
 @RequestMapping ("/api/outbound")
+@Tag (name = "Outbound", description = "Outbound document submission and transmission status")
+@SecurityRequirement (name = OpenApiConfig.SECURITY_SCHEME_NAME)
 public class OutboundController
 {
   private static final Logger LOGGER = LoggerFactory.getLogger (OutboundController.class);
@@ -112,24 +122,48 @@ public class OutboundController
    */
   @PostMapping (value = "/submit/{senderID}/{receiverID}/{docTypeID}/{processID}/{c1CountryCode}",
                 produces = MediaType.APPLICATION_JSON_VALUE)
-  public ResponseEntity <String> submitRawDocument (@PathVariable ("senderID") final String sSenderID,
-                                                    @PathVariable ("receiverID") final String sReceiverID,
-                                                    @PathVariable ("docTypeID") final String sDocTypeID,
-                                                    @PathVariable ("processID") final String sProcessID,
-                                                    @PathVariable ("c1CountryCode") final String sC1CountryCode,
-                                                    @NonNull final HttpServletRequest aServletRequest,
-                                                    @RequestParam (value = "sbdhInstanceID",
-                                                                   required = false) final String sSbdhInstanceID,
-                                                    @RequestParam (value = "mlsTo",
-                                                                   required = false) final String sMlsTo,
-                                                    @RequestParam (value = "sbdhStandard",
-                                                                   required = false) final String sSbdhStandard,
-                                                    @RequestParam (value = "sbdhTypeVersion",
-                                                                   required = false) final String sSbdhTypeVersion,
-                                                    @RequestParam (value = "sbdhType",
-                                                                   required = false) final String sSbdhType,
-                                                    @RequestParam (value = "payloadMimeType",
-                                                                   required = false) final String sPayloadMimeType) throws Exception
+  @Operation (summary = "Submit a raw document for outbound sending",
+              description = "Submits a raw business document (e.g., UBL Invoice XML) for outbound transmission. " +
+                            "The AP creates the SBDH envelope from the path/query parameters. " +
+                            "Returns a Phase4PeppolSendingReport as JSON.")
+  @ApiResponses ({ @ApiResponse (responseCode = "200", description = "Document accepted and sent successfully"),
+                   @ApiResponse (responseCode = "400",
+                                 description = "Invalid Peppol identifier (sender, receiver, document type or process)"),
+                   @ApiResponse (responseCode = "401",
+                                 description = "Missing or invalid API token",
+                                 content = @Content),
+                   @ApiResponse (responseCode = "404",
+                                 description = "Sending is disabled in the configuration",
+                                 content = @Content),
+                   @ApiResponse (responseCode = "422", description = "Sending failed — see the report body for details") })
+  public ResponseEntity <String> submitRawDocument (@Parameter (description = "Peppol Participant ID of the sender (C1)",
+                                                                required = true,
+                                                                example = "iso6523-actorid-upis::0088:senderbackend") @PathVariable ("senderID") final String sSenderID,
+                                                    @Parameter (description = "Peppol Participant ID of the receiver (C4)",
+                                                                required = true,
+                                                                example = "iso6523-actorid-upis::0088:receiverbackend") @PathVariable ("receiverID") final String sReceiverID,
+                                                    @Parameter (description = "Peppol Document Type Identifier",
+                                                                required = true,
+                                                                example = "busdox-docid-qns::urn:oasis:names:specification:ubl:schema:xsd:Invoice-2::Invoice##urn:peppol:pint:billing-1@jp:peppol-1::2.1") @PathVariable ("docTypeID") final String sDocTypeID,
+                                                    @Parameter (description = "Peppol Process Identifier",
+                                                                required = true,
+                                                                example = "cenbii-procid-ubl::urn:peppol:pint:billing-1@jp-1") @PathVariable ("processID") final String sProcessID,
+                                                    @Parameter (description = "ISO 3166-1 alpha-2 country code of the sender (C1)",
+                                                                required = true,
+                                                                example = "AT") @PathVariable ("c1CountryCode") final String sC1CountryCode,
+                                                    @Parameter (hidden = true) @NonNull final HttpServletRequest aServletRequest,
+                                                    @Parameter (description = "Custom SBDH Instance Identifier. A random UUID-based identifier is generated when omitted.") @RequestParam (value = "sbdhInstanceID",
+                                                                                                                                                                                            required = false) final String sSbdhInstanceID,
+                                                    @Parameter (description = "Alternative Peppol Participant ID to receive MLS responses") @RequestParam (value = "mlsTo",
+                                                                                                                                                            required = false) final String sMlsTo,
+                                                    @Parameter (description = "SBDH Standard override for non-XML payloads (e.g., urn:peppol:doctype:pdf+xml). Auto-derived from the document type when omitted.") @RequestParam (value = "sbdhStandard",
+                                                                                                                                                                                                                                  required = false) final String sSbdhStandard,
+                                                    @Parameter (description = "SBDH TypeVersion override (e.g., 0). Auto-derived from the document type when omitted.") @RequestParam (value = "sbdhTypeVersion",
+                                                                                                                                                                                       required = false) final String sSbdhTypeVersion,
+                                                    @Parameter (description = "SBDH Type override (e.g., factur-x). Auto-derived from the document type when omitted.") @RequestParam (value = "sbdhType",
+                                                                                                                                                                                       required = false) final String sSbdhType,
+                                                    @Parameter (description = "MIME type for binary payloads (e.g., application/pdf). When set, the payload is wrapped in <BinaryContent>; otherwise treated as XML.") @RequestParam (value = "payloadMimeType",
+                                                                                                                                                                                                                                      required = false) final String sPayloadMimeType) throws Exception
   {
     if (!APCoreConfig.isSendingEnabled ())
     {
@@ -246,9 +280,21 @@ public class OutboundController
    *         On unexpected errors.
    */
   @PostMapping (value = "/submit-sbd", produces = MediaType.APPLICATION_JSON_VALUE)
-  public ResponseEntity <String> submitPrebuiltSBD (@NonNull final HttpServletRequest aServletRequest,
-                                                    @RequestParam (value = "mlsTo",
-                                                                   required = false) final String sMlsTo) throws Exception
+  @Operation (summary = "Submit a pre-built SBD for outbound sending",
+              description = "Submits a complete Standard Business Document (with SBDH already present). All Peppol metadata " +
+                            "(sender, receiver, document type, process, C1 country code) is extracted from the SBDH.")
+  @ApiResponses ({ @ApiResponse (responseCode = "200", description = "SBD accepted and sent successfully"),
+                   @ApiResponse (responseCode = "400", description = "Failed to submit the outbound SBD transaction"),
+                   @ApiResponse (responseCode = "401",
+                                 description = "Missing or invalid API token",
+                                 content = @Content),
+                   @ApiResponse (responseCode = "404",
+                                 description = "Sending is disabled in the configuration",
+                                 content = @Content),
+                   @ApiResponse (responseCode = "422", description = "Sending failed — see the report body for details") })
+  public ResponseEntity <String> submitPrebuiltSBD (@Parameter (hidden = true) @NonNull final HttpServletRequest aServletRequest,
+                                                    @Parameter (description = "Alternative Peppol Participant ID to receive MLS responses") @RequestParam (value = "mlsTo",
+                                                                                                                                                            required = false) final String sMlsTo) throws Exception
   {
     if (!APCoreConfig.isSendingEnabled ())
     {
@@ -304,14 +350,34 @@ public class OutboundController
    */
   @PostMapping (value = "/submit-auto/{senderID}/{receiverID}/{c1CountryCode}",
                 produces = MediaType.APPLICATION_JSON_VALUE)
-  public ResponseEntity <String> submitAutoDetect (@PathVariable ("senderID") final String sSenderID,
-                                                   @PathVariable ("receiverID") final String sReceiverID,
-                                                   @PathVariable ("c1CountryCode") final String sC1CountryCode,
-                                                   @NonNull final HttpServletRequest aServletRequest,
-                                                   @RequestParam (value = "sbdhInstanceID",
-                                                                  required = false) final String sSbdhInstanceID,
-                                                   @RequestParam (value = "mlsTo",
-                                                                  required = false) final String sMlsTo) throws Exception
+  @Operation (summary = "Submit a document with auto-detected document type",
+              description = "Submits a raw business document for outbound sending using the DDD (Document Details Determinator) " +
+                            "library to determine the document type and process identifiers from the XML automatically. " +
+                            "Does not support binary payloads or SBDH overrides. Since v0.2.0.")
+  @ApiResponses ({ @ApiResponse (responseCode = "200", description = "Document accepted and sent successfully"),
+                   @ApiResponse (responseCode = "400",
+                                 description = "Empty body, invalid XML, unrecognised document type, or invalid participant ID"),
+                   @ApiResponse (responseCode = "401",
+                                 description = "Missing or invalid API token",
+                                 content = @Content),
+                   @ApiResponse (responseCode = "404",
+                                 description = "Sending is disabled in the configuration",
+                                 content = @Content),
+                   @ApiResponse (responseCode = "422", description = "Sending failed — see the report body for details") })
+  public ResponseEntity <String> submitAutoDetect (@Parameter (description = "Peppol Participant ID of the sender (C1)",
+                                                               required = true,
+                                                               example = "iso6523-actorid-upis::0088:senderbackend") @PathVariable ("senderID") final String sSenderID,
+                                                   @Parameter (description = "Peppol Participant ID of the receiver (C4)",
+                                                               required = true,
+                                                               example = "iso6523-actorid-upis::0088:receiverbackend") @PathVariable ("receiverID") final String sReceiverID,
+                                                   @Parameter (description = "ISO 3166-1 alpha-2 country code of the sender (C1)",
+                                                               required = true,
+                                                               example = "AT") @PathVariable ("c1CountryCode") final String sC1CountryCode,
+                                                   @Parameter (hidden = true) @NonNull final HttpServletRequest aServletRequest,
+                                                   @Parameter (description = "Custom SBDH Instance Identifier. A random UUID-based identifier is generated when omitted.") @RequestParam (value = "sbdhInstanceID",
+                                                                                                                                                                                           required = false) final String sSbdhInstanceID,
+                                                   @Parameter (description = "Alternative Peppol Participant ID to receive MLS responses") @RequestParam (value = "mlsTo",
+                                                                                                                                                           required = false) final String sMlsTo) throws Exception
   {
     if (!APCoreConfig.isSendingEnabled ())
     {
@@ -439,6 +505,20 @@ public class OutboundController
   @PostMapping (value = "/submit-s3",
                 consumes = MediaType.APPLICATION_JSON_VALUE,
                 produces = MediaType.APPLICATION_JSON_VALUE)
+  @Operation (summary = "Submit a document referenced from S3",
+              description = "Submits a document for outbound sending by referencing an S3 object instead of inlining the payload. " +
+                            "The Sender Backend uploads the document to S3 first, then calls this endpoint. " +
+                            "Requires 'outbound.s3.enabled=true'. Since v0.1.1.")
+  @ApiResponses ({ @ApiResponse (responseCode = "200", description = "Document fetched, accepted and sent successfully"),
+                   @ApiResponse (responseCode = "400",
+                                 description = "Outbound S3 disabled, missing required fields, invalid identifiers, or S3 fetch failed"),
+                   @ApiResponse (responseCode = "401",
+                                 description = "Missing or invalid API token",
+                                 content = @Content),
+                   @ApiResponse (responseCode = "404",
+                                 description = "Sending is disabled in the configuration",
+                                 content = @Content),
+                   @ApiResponse (responseCode = "422", description = "Sending failed — see the report body for details") })
   public ResponseEntity <String> submitFromS3 (@RequestBody final OutboundS3SubmitRequest aRequest)
   {
     if (!APCoreConfig.isSendingEnabled ())
@@ -617,8 +697,21 @@ public class OutboundController
    * @return The transaction details, or 404 if not found.
    */
   @GetMapping ("/status/{sbdhInstanceID}")
-  public ResponseEntity <OutboundTransactionResponse> getStatus (@PathVariable ("sbdhInstanceID") final String sSbdhInstanceID,
-                                                                 @RequestParam (name = "includeArchive", defaultValue = "false") final boolean bIncludeArchive)
+  @Operation (summary = "Query outbound transaction status",
+              description = "Returns the current status of a specific outbound transaction. By default only the active " +
+                            "outbound_transaction table is searched. Pass includeArchive=true to also consider archived transactions.")
+  @ApiResponses ({ @ApiResponse (responseCode = "200", description = "Transaction found"),
+                   @ApiResponse (responseCode = "401",
+                                 description = "Missing or invalid API token",
+                                 content = @Content),
+                   @ApiResponse (responseCode = "404",
+                                 description = "No outbound transaction with the given SBDH Instance ID",
+                                 content = @Content) })
+  public ResponseEntity <OutboundTransactionResponse> getStatus (@Parameter (description = "Peppol SBDH Instance Identifier of the outbound message",
+                                                                             required = true,
+                                                                             example = "550e8400-e29b-41d4-a716-446655440000") @PathVariable ("sbdhInstanceID") final String sSbdhInstanceID,
+                                                                 @Parameter (description = "When true, the archive table is consulted if the transaction is not in the active table. Since 0.9.0.") @RequestParam (name = "includeArchive",
+                                                                                                                                                                                                                    defaultValue = "false") final boolean bIncludeArchive)
   {
     LOGGER.info ("Checking for status of transmission with ID '" +
                  sSbdhInstanceID +
@@ -644,6 +737,13 @@ public class OutboundController
    * @return A list of in-transmission outbound transactions.
    */
   @GetMapping ("/in-transmission")
+  @Operation (summary = "List outbound transactions in transmission",
+              description = "Returns all outbound transactions that are not yet in a final state — includes status pending, " +
+                            "sending, failed (awaiting retry). Excludes rejected, sent, permanently_failed.")
+  @ApiResponses ({ @ApiResponse (responseCode = "200", description = "List of outbound transactions"),
+                   @ApiResponse (responseCode = "401",
+                                 description = "Missing or invalid API token",
+                                 content = @Content) })
   public ResponseEntity <List <OutboundTransactionResponse>> getInTransmission ()
   {
     LOGGER.info ("Checking for all outbound transmissions in progress");

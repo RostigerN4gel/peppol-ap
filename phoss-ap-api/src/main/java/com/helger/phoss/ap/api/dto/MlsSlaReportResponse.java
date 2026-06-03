@@ -18,6 +18,8 @@ package com.helger.phoss.ap.api.dto;
 
 import java.util.List;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
 /**
  * JSON response DTO representing an MLS SLA compliance report with individual measurement entries
  * and aggregated statistics. Usable both for server-side serialization and client-side
@@ -28,14 +30,30 @@ import java.util.List;
  *
  * @author Philip Helger
  */
+@Schema (description = "MLS SLA compliance report — aggregated statistics plus the underlying " +
+                       "individual measurements. Used for both MLS-1 (receiving side, 20-minute threshold) " +
+                       "and MLS-2 (sending side, 25-minute threshold) per Peppol Network Policy.")
 public class MlsSlaReportResponse
 {
+  @Schema (description = "Total number of measured transactions", example = "1240")
   private int totalCount;
+
+  @Schema (description = "Number of measurements within the SLA threshold", example = "1238")
   private int withinSlaCount;
+
+  @Schema (description = "Actual compliance percentage", example = "99.84")
   private double compliancePercent;
+
+  @Schema (description = "Required target percentage per Peppol Network Policy", example = "99.5")
   private double targetPercent;
+
+  @Schema (description = "SLA threshold in seconds (1200 for MLS-1, 1500 for MLS-2)", example = "1200")
   private long thresholdSeconds;
+
+  @Schema (description = "Whether the target is currently met")
   private boolean meetingSla;
+
+  @Schema (description = "Individual SLA measurement entries")
   private List <MlsSlaEntryResponse> entries;
 
   /**

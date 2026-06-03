@@ -16,6 +16,8 @@
  */
 package com.helger.phoss.ap.api.dto;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
 /**
  * JSON request DTO for submitting an outbound document by reference to an S3 object. The document
  * payload is fetched from the specified S3 bucket and key rather than being inlined in the HTTP
@@ -24,23 +26,62 @@ package com.helger.phoss.ap.api.dto;
  * @author Philip Helger
  * @since v0.1.1
  */
+@Schema (description = "Request body for /api/outbound/submit-s3 — Peppol identifiers plus an S3 reference. " +
+                       "The Sender Backend uploads the document to S3 first, then calls the AP with this payload.")
 public class OutboundS3SubmitRequest
 {
-  // Required fields
+  @Schema (description = "Peppol Participant ID of the sender (C1)",
+           example = "iso6523-actorid-upis::0088:senderbackend",
+           requiredMode = Schema.RequiredMode.REQUIRED)
   private String senderID;
+
+  @Schema (description = "Peppol Participant ID of the receiver (C4)",
+           example = "iso6523-actorid-upis::0088:receiverbackend",
+           requiredMode = Schema.RequiredMode.REQUIRED)
   private String receiverID;
+
+  @Schema (description = "Peppol Document Type Identifier",
+           example = "busdox-docid-qns::urn:oasis:names:specification:ubl:schema:xsd:Invoice-2::Invoice##urn:peppol:pint:billing-1@jp:peppol-1::2.1",
+           requiredMode = Schema.RequiredMode.REQUIRED)
   private String docTypeID;
+
+  @Schema (description = "Peppol Process Identifier",
+           example = "cenbii-procid-ubl::urn:peppol:pint:billing-1@jp-1",
+           requiredMode = Schema.RequiredMode.REQUIRED)
   private String processID;
+
+  @Schema (description = "ISO 3166-1 alpha-2 country code of the sender (C1)",
+           example = "AT",
+           requiredMode = Schema.RequiredMode.REQUIRED)
   private String c1CountryCode;
+
+  @Schema (description = "S3 bucket where the document was uploaded. Defaults to the configured 'outbound.s3.bucket' when omitted.",
+           example = "sender-documents")
   private String s3Bucket;
+
+  @Schema (description = "S3 object key of the uploaded document",
+           example = "outbound/2026/invoice-12345.xml",
+           requiredMode = Schema.RequiredMode.REQUIRED)
   private String s3Key;
 
-  // Optional fields
+  @Schema (description = "Custom SBDH Instance Identifier. A random UUID-based identifier is generated when omitted.",
+           example = "550e8400-e29b-41d4-a716-446655440000")
   private String sbdhInstanceID;
+
+  @Schema (description = "Alternative Peppol Participant ID to receive MLS responses")
   private String mlsTo;
+
+  @Schema (description = "SBDH Standard override for non-XML payloads (e.g., urn:peppol:doctype:pdf+xml). Auto-derived from the document type when omitted.")
   private String sbdhStandard;
+
+  @Schema (description = "SBDH TypeVersion override (e.g., '0'). Auto-derived from the document type when omitted.")
   private String sbdhTypeVersion;
+
+  @Schema (description = "SBDH Type override (e.g., 'factur-x'). Auto-derived from the document type when omitted.")
   private String sbdhType;
+
+  @Schema (description = "MIME type for binary payloads (e.g., 'application/pdf'). When set the payload is wrapped in <BinaryContent>; otherwise treated as XML.",
+           example = "application/pdf")
   private String payloadMimeType;
 
   /** @return the sender participant ID */

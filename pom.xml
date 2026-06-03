@@ -69,6 +69,8 @@
     <sentry.version>8.43.0</sentry.version>
     <spring-boot.version>4.0.6</spring-boot.version>
     <springdoc.version>3.0.3</springdoc.version>
+    <!-- Aligned with the minor version pulled in transitively by springdoc -->
+    <swagger-annotations.version>2.2.50</swagger-annotations.version>
     <sshd-sftp.version>2.18.0</sshd-sftp.version>
 
     <ph-commons.version>12.2.6</ph-commons.version>
@@ -297,6 +299,13 @@
         <groupId>tools.jackson.core</groupId>
         <artifactId>jackson-databind</artifactId>
         <version>${jackson.version}</version>
+      </dependency>
+
+      <!-- OpenAPI related dependencies -->
+      <dependency>
+        <groupId>io.swagger.core.v3</groupId>
+        <artifactId>swagger-annotations-jakarta</artifactId>
+        <version>${swagger-annotations.version}</version>
       </dependency>
     </dependencies>
   </dependencyManagement>

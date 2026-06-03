@@ -20,17 +20,33 @@ import org.jspecify.annotations.NonNull;
 
 import com.helger.annotation.Nonnegative;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
 /**
  * JSON response DTO for an individual MLS SLA measurement data point.
  *
  * @author Philip Helger
  */
+@Schema (description = "Single MLS SLA measurement — one observed business document with the durations between " +
+                       "its M1 and M2/M3 timestamps.")
 public class MlsSlaEntryResponse
 {
+  @Schema (description = "SBDH Instance Identifier of the original business document",
+           example = "550e8400-e29b-41d4-a716-446655440000")
   private String sbdhInstanceID;
+
+  @Schema (description = "M1 timestamp — AS4 timestamp of the received (MLS-1) or sent (MLS-2) business document, ISO-8601 UTC",
+           example = "2026-03-27T14:30:00Z")
   private String m1;
+
+  @Schema (description = "M2 (MLS-1: AS4 timestamp of the sent MLS response) or M3 (MLS-2: AS4 timestamp of the received MLS response), ISO-8601 UTC",
+           example = "2026-03-27T14:35:42Z")
   private String m2OrM3;
+
+  @Schema (description = "Duration in seconds (M2 - M1 for MLS-1, M3 - M1 for MLS-2)", example = "342")
   private long durationSeconds;
+
+  @Schema (description = "Whether this measurement falls within the SLA threshold")
   private boolean withinSla;
 
   /**

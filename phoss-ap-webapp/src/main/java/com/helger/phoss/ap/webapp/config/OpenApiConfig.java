@@ -21,6 +21,9 @@ import org.springframework.context.annotation.Configuration;
 
 import com.helger.phoss.ap.api.CPhossAPVersion;
 
+import io.swagger.v3.oas.annotations.enums.SecuritySchemeIn;
+import io.swagger.v3.oas.annotations.enums.SecuritySchemeType;
+import io.swagger.v3.oas.annotations.security.SecurityScheme;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.info.Contact;
 import io.swagger.v3.oas.models.info.Info;
@@ -28,14 +31,23 @@ import io.swagger.v3.oas.models.info.License;
 
 /**
  * Top-level OpenAPI document metadata. The OpenAPI specification itself is produced at runtime by
- * springdoc-openapi (no UI is bundled — only the raw spec endpoints {@code /v3/api-docs} and
- * {@code /v3/api-docs.yaml} are exposed).
+ * springdoc-openapi (no UI is bundled — only the raw spec endpoints {@code /openapi/v3/api-docs}
+ * and {@code /openapi/v3/api-docs.yaml} are exposed). The {@link SecurityScheme} below declares the
+ * {@code X-Token} header that protects all {@code /api/**} endpoints (see {@code ApiTokenFilter}).
  *
  * @author Philip Helger
  */
 @Configuration
+@SecurityScheme (name = OpenApiConfig.SECURITY_SCHEME_NAME,
+                 type = SecuritySchemeType.APIKEY,
+                 in = SecuritySchemeIn.HEADER,
+                 paramName = "X-Token",
+                 description = "API token configured via the 'phase4.api.requiredtoken' property. Required for all /api/** endpoints; not required for /management/**.")
 public class OpenApiConfig
 {
+  /** Name referenced by {@code @SecurityRequirement} on the protected controllers. */
+  public static final String SECURITY_SCHEME_NAME = "ApiToken";
+
   /**
    * @return The {@link OpenAPI} bean carrying title, version, contact and license metadata.
    */

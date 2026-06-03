@@ -32,6 +32,14 @@ import com.helger.phoss.ap.api.dto.MlsSlaReportResponse;
 import com.helger.phoss.ap.db.APJdbcMetaManager;
 import com.helger.phoss.ap.db.MlsMetricsManagerJdbc;
 import com.helger.phoss.ap.db.MlsMetricsManagerJdbc.MlsSlaReport;
+import com.helger.phoss.ap.webapp.config.OpenApiConfig;
+
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.tags.Tag;
 
 /**
  * REST controller for MLS (Message Level Status) related operations including querying transactions
@@ -41,6 +49,8 @@ import com.helger.phoss.ap.db.MlsMetricsManagerJdbc.MlsSlaReport;
  */
 @RestController
 @RequestMapping ("/api/mls")
+@Tag (name = "MLS", description = "Message Level Status — missing responses and SLA reports per Peppol Network Policy")
+@SecurityRequirement (name = OpenApiConfig.SECURITY_SCHEME_NAME)
 public class MlsController
 {
   /**
@@ -49,6 +59,14 @@ public class MlsController
    * @return List of inbound transactions without MLS response.
    */
   @GetMapping ("/missing")
+  @Operation (summary = "List inbound transactions missing an MLS response",
+              description = "Returns all inbound business document transactions for which no MLS response has been sent yet " +
+                            "(mls_response_code IS NULL). Excludes incoming MLS messages themselves.")
+  @ApiResponses ({ @ApiResponse (responseCode = "200",
+                                 description = "List of inbound transactions without an MLS response"),
+                   @ApiResponse (responseCode = "401",
+                                 description = "Missing or invalid API token",
+                                 content = @Content) })
   public ResponseEntity <List <InboundTransactionResponse>> getMissingMls ()
   {
     final IInboundTransactionManager aTxMgr = APJdbcMetaManager.getInboundTransactionMgr ();
@@ -93,6 +111,13 @@ public class MlsController
    * @return The MLS-1 SLA report.
    */
   @GetMapping ("/sla/mls1")
+  @Operation (summary = "MLS-1 SLA report (receiving side)",
+              description = "Measures M2 - M1: time between receiving the original business document (M1) and successfully " +
+                            "sending back the MLS response (M2). Per Peppol Network Policy: 99.5% must be within 20 minutes.")
+  @ApiResponses ({ @ApiResponse (responseCode = "200", description = "MLS-1 SLA report"),
+                   @ApiResponse (responseCode = "401",
+                                 description = "Missing or invalid API token",
+                                 content = @Content) })
   public ResponseEntity <MlsSlaReportResponse> getMls1Sla ()
   {
     final MlsMetricsManagerJdbc aMetricsMgr = APJdbcMetaManager.getMlsMetricsMgr ();
@@ -109,6 +134,13 @@ public class MlsController
    * @return The MLS-2 SLA report.
    */
   @GetMapping ("/sla/mls2")
+  @Operation (summary = "MLS-2 SLA report (sending side)",
+              description = "Measures M3 - M1: time between successfully sending the business document (M1) and receiving " +
+                            "the MLS response from C3 (M3). Per Peppol Network Policy: 99.5% must be within 25 minutes.")
+  @ApiResponses ({ @ApiResponse (responseCode = "200", description = "MLS-2 SLA report"),
+                   @ApiResponse (responseCode = "401",
+                                 description = "Missing or invalid API token",
+                                 content = @Content) })
   public ResponseEntity <MlsSlaReportResponse> getMls2Sla ()
   {
     final MlsMetricsManagerJdbc aMetricsMgr = APJdbcMetaManager.getMlsMetricsMgr ();

@@ -16,16 +16,26 @@
  */
 package com.helger.phoss.ap.api.dto;
 
+import io.swagger.v3.oas.annotations.media.Schema;
+
 /**
  * JSON response DTO for reporting API operations, carrying a transaction ID, status, and a
  * human-readable message.
  *
  * @author Philip Helger
  */
+@Schema (description = "Outcome of a reporting API operation — internal transaction ID, status keyword " +
+                       "and a human-readable message.")
 public class ReportResponse
 {
+  @Schema (description = "Internal transaction ID affected by the operation")
   private String transactionID;
+
+  @Schema (description = "Status keyword describing the outcome", example = "updated")
   private String status;
+
+  @Schema (description = "Human-readable message describing what happened",
+           example = "C4 country code set to 'AT'")
   private String message;
 
   /**

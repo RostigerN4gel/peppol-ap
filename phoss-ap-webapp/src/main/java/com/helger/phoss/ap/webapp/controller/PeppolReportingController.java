@@ -26,6 +26,15 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.helger.phoss.ap.core.reporting.APPeppolReportHelper;
+import com.helger.phoss.ap.webapp.config.OpenApiConfig;
+
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.tags.Tag;
 
 /**
  * This is the primary REST controller for the APIs to create Peppol Reports TSR and EUSR.<br>
@@ -35,6 +44,9 @@ import com.helger.phoss.ap.core.reporting.APPeppolReportHelper;
  */
 @RestController
 @RequestMapping ("/api/reporting")
+@Tag (name = "Peppol Reporting",
+      description = "Create and send Peppol TSR and EUSR reports. Requires a configured Peppol Reporting backend.")
+@SecurityRequirement (name = OpenApiConfig.SECURITY_SCHEME_NAME)
 public class PeppolReportingController
 {
   /**
@@ -47,10 +59,22 @@ public class PeppolReportingController
    * @return The created TSR reporting in XML in UTF-8 encoding
    */
   @GetMapping (path = "/create-tsr/{year}/{month}", produces = MediaType.APPLICATION_XML_VALUE)
-  public ResponseEntity <String> createPeppolReportingTSR (@PathVariable (name = "year",
-                                                                          required = true) final int nYear,
-                                                           @PathVariable (name = "month",
-                                                                          required = true) final int nMonth)
+  @Operation (summary = "Create Transaction Statistics Report (TSR)",
+              description = "Creates a TSR for the given year/month and returns it as XML.")
+  @ApiResponses ({ @ApiResponse (responseCode = "200", description = "TSR XML document"),
+                   @ApiResponse (responseCode = "401",
+                                 description = "Missing or invalid API token",
+                                 content = @Content),
+                   @ApiResponse (responseCode = "500",
+                                 description = "Failed to read Peppol Reporting backend data") })
+  public ResponseEntity <String> createPeppolReportingTSR (@Parameter (description = "Calendar year. Must be >= 2024.",
+                                                                       required = true,
+                                                                       example = "2026") @PathVariable (name = "year",
+                                                                                                        required = true) final int nYear,
+                                                           @Parameter (description = "Calendar month (1-12).",
+                                                                       required = true,
+                                                                       example = "3") @PathVariable (name = "month",
+                                                                                                     required = true) final int nMonth)
   {
     final YearMonth aYearMonth = APPeppolReportHelper.getValidYearMonthInAPI (nYear, nMonth);
     final String sReport = APPeppolReportHelper.createTSRAsString (aYearMonth);
@@ -69,10 +93,22 @@ public class PeppolReportingController
    * @return The created EUSR reporting in XML in UTF-8 encoding
    */
   @GetMapping (path = "/create-eusr/{year}/{month}", produces = MediaType.APPLICATION_XML_VALUE)
-  public ResponseEntity <String> createPeppolReportingEUSR (@PathVariable (name = "year",
-                                                                           required = true) final int nYear,
-                                                            @PathVariable (name = "month",
-                                                                           required = true) final int nMonth)
+  @Operation (summary = "Create End User Statistics Report (EUSR)",
+              description = "Creates an EUSR for the given year/month and returns it as XML.")
+  @ApiResponses ({ @ApiResponse (responseCode = "200", description = "EUSR XML document"),
+                   @ApiResponse (responseCode = "401",
+                                 description = "Missing or invalid API token",
+                                 content = @Content),
+                   @ApiResponse (responseCode = "500",
+                                 description = "Failed to read Peppol Reporting backend data") })
+  public ResponseEntity <String> createPeppolReportingEUSR (@Parameter (description = "Calendar year. Must be >= 2024.",
+                                                                        required = true,
+                                                                        example = "2026") @PathVariable (name = "year",
+                                                                                                         required = true) final int nYear,
+                                                            @Parameter (description = "Calendar month (1-12).",
+                                                                        required = true,
+                                                                        example = "3") @PathVariable (name = "month",
+                                                                                                      required = true) final int nMonth)
   {
     final YearMonth aYearMonth = APPeppolReportHelper.getValidYearMonthInAPI (nYear, nMonth);
     final String sReport = APPeppolReportHelper.createEUSRAsString (aYearMonth);
@@ -92,10 +128,22 @@ public class PeppolReportingController
    * @return A constant string
    */
   @GetMapping (path = "/do-peppol-reporting/{year}/{month}", produces = MediaType.APPLICATION_XML_VALUE)
-  public ResponseEntity <String> createValidateStoreAndSend (@PathVariable (name = "year",
-                                                                            required = true) final int nYear,
-                                                             @PathVariable (name = "month",
-                                                                            required = true) final int nMonth)
+  @Operation (summary = "Create, validate, store and send TSR + EUSR",
+              description = "Performs the full Peppol Reporting flow for the given year/month: creates both reports, " +
+                            "validates them, stores them and sends them to the dedicated receiver.")
+  @ApiResponses ({ @ApiResponse (responseCode = "200", description = "Reports created, stored and sent successfully"),
+                   @ApiResponse (responseCode = "401",
+                                 description = "Missing or invalid API token",
+                                 content = @Content),
+                   @ApiResponse (responseCode = "500", description = "Error creating or sending Peppol Reports") })
+  public ResponseEntity <String> createValidateStoreAndSend (@Parameter (description = "Calendar year. Must be >= 2024.",
+                                                                         required = true,
+                                                                         example = "2026") @PathVariable (name = "year",
+                                                                                                          required = true) final int nYear,
+                                                             @Parameter (description = "Calendar month (1-12).",
+                                                                         required = true,
+                                                                         example = "3") @PathVariable (name = "month",
+                                                                                                       required = true) final int nMonth)
   {
     final YearMonth aYearMonth = APPeppolReportHelper.getValidYearMonthInAPI (nYear, nMonth);
     if (APPeppolReportHelper.createAndSendPeppolReports (aYearMonth).isSuccess ())

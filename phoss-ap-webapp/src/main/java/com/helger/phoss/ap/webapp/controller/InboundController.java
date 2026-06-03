@@ -31,11 +31,20 @@ import org.springframework.web.bind.annotation.RestController;
 import com.helger.base.string.StringHelper;
 import com.helger.collection.commons.ICommonsList;
 import com.helger.phoss.ap.api.IInboundTransactionManager;
+import com.helger.phoss.ap.api.dto.InboundTransactionResponse;
+import com.helger.phoss.ap.api.dto.ReportResponse;
 import com.helger.phoss.ap.api.model.IInboundTransaction;
 import com.helger.phoss.ap.core.reporting.APPeppolReportingHelper;
 import com.helger.phoss.ap.db.APJdbcMetaManager;
-import com.helger.phoss.ap.api.dto.InboundTransactionResponse;
-import com.helger.phoss.ap.api.dto.ReportResponse;
+import com.helger.phoss.ap.webapp.config.OpenApiConfig;
+
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.tags.Tag;
 
 /**
  * REST controller for inbound transaction operations including reporting the C4 country code,
@@ -46,6 +55,8 @@ import com.helger.phoss.ap.api.dto.ReportResponse;
  */
 @RestController
 @RequestMapping ("/api/inbound")
+@Tag (name = "Inbound", description = "Inbound transaction reporting and status queries")
+@SecurityRequirement (name = OpenApiConfig.SECURITY_SCHEME_NAME)
 public class InboundController
 {
   private static final Logger LOGGER = LoggerFactory.getLogger (InboundController.class);
@@ -62,8 +73,26 @@ public class InboundController
    *         the C4 country code was already set.
    */
   @PostMapping ("/report")
-  public ResponseEntity <ReportResponse> reportInbound (@RequestParam ("sbdhInstanceID") final String sSbdhInstanceID,
-                                                        @RequestParam ("c4CountryCode") final String sC4CountryCode)
+  @Operation (summary = "Report C4 country code for an inbound transaction",
+              description = "Triggers the creation of a Peppol Reporting record for a previously received inbound message. " +
+                            "Called by the Receiver Backend after it has successfully processed the document. " +
+                            "Stores the C4 country code on the transaction and updates the reporting status to 'reported'.")
+  @ApiResponses ({ @ApiResponse (responseCode = "200", description = "Country code stored and reporting record created"),
+                   @ApiResponse (responseCode = "400",
+                                 description = "The transaction already has a C4 country code stored",
+                                 content = @Content),
+                   @ApiResponse (responseCode = "401",
+                                 description = "Missing or invalid API token",
+                                 content = @Content),
+                   @ApiResponse (responseCode = "404",
+                                 description = "No inbound transaction with the given SBDH Instance ID",
+                                 content = @Content) })
+  public ResponseEntity <ReportResponse> reportInbound (@Parameter (description = "Peppol SBDH Instance Identifier of the inbound message",
+                                                                    required = true,
+                                                                    example = "550e8400-e29b-41d4-a716-446655440000") @RequestParam ("sbdhInstanceID") final String sSbdhInstanceID,
+                                                        @Parameter (description = "ISO 3166-1 alpha-2 country code of the final receiver (C4)",
+                                                                    required = true,
+                                                                    example = "AT") @RequestParam ("c4CountryCode") final String sC4CountryCode)
   {
     final IInboundTransactionManager aTxMgr = APJdbcMetaManager.getInboundTransactionMgr ();
 
@@ -105,8 +134,21 @@ public class InboundController
    * @return The transaction details, or 404 if not found.
    */
   @GetMapping ("/status/{sbdhInstanceID}")
-  public ResponseEntity <InboundTransactionResponse> getStatus (@PathVariable final String sbdhInstanceID,
-                                                                @RequestParam (name = "includeArchive", defaultValue = "false") final boolean bIncludeArchive)
+  @Operation (summary = "Query inbound transaction status",
+              description = "Returns the current status of a specific inbound transaction. By default only the active " +
+                            "inbound_transaction table is searched. Pass includeArchive=true to also consider archived transactions.")
+  @ApiResponses ({ @ApiResponse (responseCode = "200", description = "Transaction found"),
+                   @ApiResponse (responseCode = "401",
+                                 description = "Missing or invalid API token",
+                                 content = @Content),
+                   @ApiResponse (responseCode = "404",
+                                 description = "No inbound transaction with the given SBDH Instance ID",
+                                 content = @Content) })
+  public ResponseEntity <InboundTransactionResponse> getStatus (@Parameter (description = "Peppol SBDH Instance Identifier of the inbound message",
+                                                                            required = true,
+                                                                            example = "550e8400-e29b-41d4-a716-446655440000") @PathVariable final String sbdhInstanceID,
+                                                                @Parameter (description = "When true, the archive table is consulted if the transaction is not in the active table. Since 0.9.0.") @RequestParam (name = "includeArchive",
+                                                                                                                                                                                                                  defaultValue = "false") final boolean bIncludeArchive)
   {
     final IInboundTransactionManager aTxMgr = APJdbcMetaManager.getInboundTransactionMgr ();
     final IInboundTransaction aTx = bIncludeArchive ? aTxMgr.getBySbdhInstanceIDIncludingArchive (sbdhInstanceID)
@@ -124,6 +166,13 @@ public class InboundController
    * @return A list of in-processing inbound transactions.
    */
   @GetMapping ("/in-processing")
+  @Operation (summary = "List inbound transactions in processing",
+              description = "Returns all inbound transactions that are not yet in a final state — includes status received, " +
+                            "forwarding, forward_failed (awaiting retry). Excludes rejected, forwarded, permanently_failed.")
+  @ApiResponses ({ @ApiResponse (responseCode = "200", description = "List of inbound transactions"),
+                   @ApiResponse (responseCode = "401",
+                                 description = "Missing or invalid API token",
+                                 content = @Content) })
   public ResponseEntity <List <InboundTransactionResponse>> getInProcessing ()
   {
     final IInboundTransactionManager aTxMgr = APJdbcMetaManager.getInboundTransactionMgr ();
@@ -140,6 +189,14 @@ public class InboundController
    * @since v0.1.3
    */
   @GetMapping ("/missing-c4-country-code")
+  @Operation (summary = "List inbound transactions missing C4 country code",
+              description = "Returns all forwarded inbound transactions for which the C4 country code has not yet been determined. " +
+                            "Only includes transactions in status forwarded where reporting is still pending. Since v0.1.3.")
+  @ApiResponses ({ @ApiResponse (responseCode = "200",
+                                 description = "List of inbound transactions without a C4 country code"),
+                   @ApiResponse (responseCode = "401",
+                                 description = "Missing or invalid API token",
+                                 content = @Content) })
   public ResponseEntity <List <InboundTransactionResponse>> getMissingC4CountryCode ()
   {
     final IInboundTransactionManager aTxMgr = APJdbcMetaManager.getInboundTransactionMgr ();
@@ -160,7 +217,22 @@ public class InboundController
    * @since v0.1.3
    */
   @GetMapping ("/missing-c4-country-code/{sbdhInstanceID}")
-  public ResponseEntity <InboundTransactionResponse> getMissingC4CountryCodeForTransaction (@PathVariable final String sbdhInstanceID)
+  @Operation (summary = "Check a specific transaction for missing C4 country code",
+              description = "Checks whether a specific inbound transaction is still missing a C4 country code. Since v0.1.3.")
+  @ApiResponses ({ @ApiResponse (responseCode = "200",
+                                 description = "The C4 country code is still missing — returns the full transaction details"),
+                   @ApiResponse (responseCode = "204",
+                                 description = "The transaction exists and the C4 country code is already set",
+                                 content = @Content),
+                   @ApiResponse (responseCode = "401",
+                                 description = "Missing or invalid API token",
+                                 content = @Content),
+                   @ApiResponse (responseCode = "404",
+                                 description = "No inbound transaction with the given SBDH Instance ID",
+                                 content = @Content) })
+  public ResponseEntity <InboundTransactionResponse> getMissingC4CountryCodeForTransaction (@Parameter (description = "Peppol SBDH Instance Identifier of the inbound message",
+                                                                                                        required = true,
+                                                                                                        example = "550e8400-e29b-41d4-a716-446655440000") @PathVariable final String sbdhInstanceID)
   {
     final IInboundTransactionManager aTxMgr = APJdbcMetaManager.getInboundTransactionMgr ();
     final IInboundTransaction aTx = aTxMgr.getBySbdhInstanceID (sbdhInstanceID);
