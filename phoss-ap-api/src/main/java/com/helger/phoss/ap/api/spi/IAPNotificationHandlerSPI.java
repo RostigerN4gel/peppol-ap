@@ -94,8 +94,8 @@ public interface IAPNotificationHandlerSPI
    * @param sProcessID
    *        Peppol process ID. Never <code>null</code>.
    * @param sSenderProviderID
-   *        Peppol sender provider ID (C2), usually derived from the signing certificate common name.
-   *        May be <code>null</code>.
+   *        Peppol sender provider ID (C2), usually derived from the signing certificate common
+   *        name. May be <code>null</code>.
    * @param sAS4MessageID
    *        AS4 Message ID. May be <code>null</code>.
    * @param sSbdhInstanceID
@@ -106,19 +106,18 @@ public interface IAPNotificationHandlerSPI
    *        <code>true</code> if an SBDH with the same Instance ID was previously received.
    * @param sErrorDetails
    *        Error details sent back as AS4 error. Never <code>null</code>.
-   * @since 0.9.1
+   * @since 0.10.0
    */
-  default void onInboundDuplicateRejected (@NonNull final String sSenderID,
-                                           @NonNull final String sReceiverID,
-                                           @NonNull final String sDocTypeID,
-                                           @NonNull final String sProcessID,
-                                           @Nullable final String sSenderProviderID,
-                                           @Nullable final String sAS4MessageID,
-                                           @NonNull final String sSbdhInstanceID,
-                                           final boolean bIsDuplicateAS4,
-                                           final boolean bIsDuplicateSBDH,
-                                           @NonNull final String sErrorDetails)
-  {}
+  void onInboundDuplicateRejected (@NonNull String sSenderID,
+                                   @NonNull String sReceiverID,
+                                   @NonNull String sDocTypeID,
+                                   @NonNull String sProcessID,
+                                   @Nullable String sSenderProviderID,
+                                   @Nullable String sAS4MessageID,
+                                   @NonNull String sSbdhInstanceID,
+                                   boolean bIsDuplicateAS4,
+                                   boolean bIsDuplicateSBDH,
+                                   @NonNull String sErrorDetails);
 
   /**
    * Called when the inbound message is an MLS but could not be correlated with an outbound

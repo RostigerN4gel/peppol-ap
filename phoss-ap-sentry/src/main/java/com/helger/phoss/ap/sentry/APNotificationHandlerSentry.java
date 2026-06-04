@@ -115,6 +115,41 @@ public class APNotificationHandlerSentry implements IAPNotificationHandlerSPI
   }
 
   /** {@inheritDoc} */
+  public void onInboundDuplicateRejected (@NonNull final String sSenderID,
+                                          @NonNull final String sReceiverID,
+                                          @NonNull final String sDocTypeID,
+                                          @NonNull final String sProcessID,
+                                          @Nullable final String sSenderProviderID,
+                                          @Nullable final String sAS4MessageID,
+                                          @NonNull final String sSbdhInstanceID,
+                                          final boolean bIsDuplicateAS4,
+                                          final boolean bIsDuplicateSBDH,
+                                          @NonNull final String sErrorDetails)
+  {
+    _logError ("onInboundDuplicateRejected",
+               Map.of ("senderID",
+                       sSenderID,
+                       "receiverID",
+                       sReceiverID,
+                       "docTypeID",
+                       sDocTypeID,
+                       "processID",
+                       sProcessID,
+                       "senderProviderID",
+                       sSenderProviderID,
+                       "AS4MessageID",
+                       sAS4MessageID,
+                       "sbdhInstanceID",
+                       sSbdhInstanceID,
+                       "isDuplicateAS4",
+                       Boolean.valueOf (bIsDuplicateAS4),
+                       "isDuplicateSBDH",
+                       Boolean.valueOf (bIsDuplicateSBDH),
+                       "errorDetails",
+                       sErrorDetails));
+  }
+
+  /** {@inheritDoc} */
   public void onInboundMLSCorrelationError (@NonNull final String sTransactionID,
                                             @NonNull final String sReferencedSbdhInstanceID,
                                             @NonNull final EPeppolMLSResponseCode eMlsResponseCode)
