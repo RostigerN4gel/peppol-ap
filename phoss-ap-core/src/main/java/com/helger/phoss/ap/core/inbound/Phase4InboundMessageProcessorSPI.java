@@ -59,7 +59,6 @@ import com.helger.phoss.ap.api.datetime.IAPTimestampManager;
 import com.helger.phoss.ap.api.mgr.IDocumentPayloadManager;
 import com.helger.phoss.ap.api.model.IInboundTransaction;
 import com.helger.phoss.ap.api.model.MlsOutcome;
-import com.helger.phoss.ap.api.model.MlsOutcomeIssue;
 import com.helger.phoss.ap.api.otel.CPhossAPOtel;
 import com.helger.phoss.ap.api.spi.IInboundDocumentVerifierSPI;
 import com.helger.phoss.ap.api.spi.IPeppolReceiverCheckSPI;
@@ -331,7 +330,10 @@ public class Phase4InboundMessageProcessorSPI implements IPhase4PeppolIncomingSB
           {
             for (final IInboundDocumentVerifierSPI aVerifier : APCoreMetaManager.getAllInboundVerifiers ())
             {
-              if (aVerifier.verifyInboundDocument (sDocumentPath, aDocTypeID, aProcessID).isFailure ())
+              final MlsOutcome aVerifierOutcome = aVerifier.verifyInboundDocument (sDocumentPath,
+                                                                                   aDocTypeID,
+                                                                                   aProcessID);
+              if (aVerifierOutcome != null && aVerifierOutcome.getResponseCode ().isFailure ())
               {
                 aVerifySpan.setStatusError ("Inbound verification failed");
                 LOGGER.warn (sLogPrefix + "Inbound document verification failed for '" + sSbdhInstanceID + "'");
@@ -342,11 +344,8 @@ public class Phase4InboundMessageProcessorSPI implements IPhase4PeppolIncomingSB
                 {
                   // Send asynchronously
                   PhotonWorkerPool.getInstance ().run ("send-mls", () -> {
-                    // Send negative MLS (RE) back to C2
-                    final MlsOutcome aOutcome = MlsOutcome.rejection ("Document validation failed",
-                                                                      MlsOutcomeIssue.businessRuleViolation ("NA",
-                                                                                                             "Inbound document verification failed"));
-                    MlsHandler.triggerSendingInboundResultMls (aInboundTx, aOutcome);
+                    // Send negative MLS (RE) back to C2 with the verifier's detailed outcome
+                    MlsHandler.triggerSendingInboundResultMls (aInboundTx, aVerifierOutcome);
                   });
                 }
 

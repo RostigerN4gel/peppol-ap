@@ -17,12 +17,13 @@
 package com.helger.phoss.ap.api.spi;
 
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import com.helger.annotation.Nonempty;
 import com.helger.annotation.style.IsSPIInterface;
-import com.helger.base.state.ESuccess;
 import com.helger.peppolid.IDocumentTypeIdentifier;
 import com.helger.peppolid.IProcessIdentifier;
+import com.helger.phoss.ap.api.model.MlsOutcome;
 
 /**
  * SPI interface for optional document verification. Implementations are loaded via
@@ -43,11 +44,13 @@ public interface IInboundDocumentVerifierSPI
    *        The Peppol Document Type Identifier. Never <code>null</code>.
    * @param aProcessID
    *        The Peppol Process Identifier. Never <code>null</code>.
-   * @return {@link ESuccess#SUCCESS} if the document is valid, {@link ESuccess#FAILURE} if
-   *         verification failed.
+   * @return <code>null</code> or an {@link MlsOutcome} with a non-failing response code if the
+   *         verifier has no objection. A non-<code>null</code> {@link MlsOutcome} with response
+   *         code {@link com.helger.peppol.mls.EPeppolMLSResponseCode#REJECTION REJECTION} signals
+   *         that the document is rejected; its issues are propagated into the MLS response.
    */
-  @NonNull
-  ESuccess verifyInboundDocument (@NonNull @Nonempty String sDocumentPath,
-                                  @NonNull IDocumentTypeIdentifier aDocTypeID,
-                                  @NonNull IProcessIdentifier aProcessID);
+  @Nullable
+  MlsOutcome verifyInboundDocument (@NonNull @Nonempty String sDocumentPath,
+                                    @NonNull IDocumentTypeIdentifier aDocTypeID,
+                                    @NonNull IProcessIdentifier aProcessID);
 }

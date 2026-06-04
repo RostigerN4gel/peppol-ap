@@ -23,6 +23,7 @@ import org.apache.hc.client5.http.classic.methods.HttpPost;
 import org.apache.hc.core5.http.ContentType;
 import org.apache.hc.core5.http.io.entity.InputStreamEntity;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -39,15 +40,17 @@ import com.helger.httpclient.response.ExtendedHttpResponseException;
 import com.helger.httpclient.response.ResponseHandlerByteArray;
 import com.helger.json.IJsonObject;
 import com.helger.json.serialize.JsonReader;
+import com.helger.peppol.mls.EPeppolMLSStatusReasonCode;
 import com.helger.peppolid.IDocumentTypeIdentifier;
 import com.helger.peppolid.IProcessIdentifier;
 import com.helger.phive.api.result.ValidationResultList;
-import com.helger.phive.api.validity.EExtendedValidity;
 import com.helger.phive.result.json.PhiveJsonHelper;
 import com.helger.phoss.ap.api.CPhossAP;
 import com.helger.phoss.ap.api.config.APConfigProvider;
 import com.helger.phoss.ap.api.config.APConfigurationProperties;
 import com.helger.phoss.ap.api.mgr.IDocumentPayloadManager;
+import com.helger.phoss.ap.api.model.MlsOutcome;
+import com.helger.phoss.ap.api.model.MlsOutcomeIssue;
 import com.helger.phoss.ap.api.spi.IInboundDocumentVerifierSPI;
 import com.helger.phoss.ap.api.spi.IOutboundDocumentVerifierSPI;
 import com.helger.phoss.ap.basic.APBasicConfig;
@@ -66,8 +69,32 @@ public class PhormDocumentVerifier implements IInboundDocumentVerifierSPI, IOutb
   private static final String HTTP_HEADER_X_TOKEN = "X-Token";
   private static final Logger LOGGER = LoggerFactory.getLogger (PhormDocumentVerifier.class);
 
+  private enum EPhormCallState
+  {
+    /** Phorm is not configured - skip verification */
+    SKIPPED,
+    /** Phorm call could not be completed (configuration error, HTTP, parse) - fail closed */
+    FAILED,
+    /** Phorm call completed - {@link PhormCallResult#results} is non-null */
+    COMPLETED
+  }
+
+  private static record PhormCallResult (@NonNull EPhormCallState state, @Nullable ValidationResultList results)
+  {
+    @NonNull
+    static final PhormCallResult SKIPPED = new PhormCallResult (EPhormCallState.SKIPPED, null);
+    @NonNull
+    static final PhormCallResult FAILED = new PhormCallResult (EPhormCallState.FAILED, null);
+
+    @NonNull
+    static PhormCallResult completed (@NonNull final ValidationResultList aResults)
+    {
+      return new PhormCallResult (EPhormCallState.COMPLETED, aResults);
+    }
+  }
+
   @NonNull
-  private ESuccess _callPhorm (@NonNull @Nonempty final String sDocumentPath)
+  private PhormCallResult _callPhorm (@NonNull @Nonempty final String sDocumentPath)
   {
     final IDocumentPayloadManager aDocPayloadMgr = APBasicMetaManager.getDocPayloadMgr ();
     final IConfig aConfig = APConfigProvider.getConfig ();
@@ -80,26 +107,26 @@ public class PhormDocumentVerifier implements IInboundDocumentVerifierSPI, IOutb
         LOGGER.debug ("Phorm URL is not configured ('" + APConfigurationProperties.VERIFICATION_PHORM_URL + "')");
 
       // Don't break document processing if Phorm is not used
-      return ESuccess.SUCCESS;
+      return PhormCallResult.SKIPPED;
     }
 
     if (URLHelper.getAsURL (sPhormBaseURL) == null)
     {
       LOGGER.error ("Phorm URL '" + sPhormBaseURL + "' is not a valid URL");
-      return ESuccess.FAILURE;
+      return PhormCallResult.FAILED;
     }
 
     if (StringHelper.isEmpty (sPhormToken))
     {
       LOGGER.error ("Phorm URL '" + sPhormBaseURL + "' looks okay but the Token is not configured");
-      return ESuccess.FAILURE;
+      return PhormCallResult.FAILED;
     }
 
     final String sURL = StringHelper.trimEnd (sPhormBaseURL, '/') + "/api/dd_and_validate/";
     if (!aDocPayloadMgr.existsDocument (sDocumentPath))
     {
       LOGGER.error ("Document path '" + sDocumentPath + "' does not exist");
-      return ESuccess.FAILURE;
+      return PhormCallResult.FAILED;
     }
 
     final HttpClientSettings aHCS = new HttpClientSettings ();
@@ -119,25 +146,24 @@ public class PhormDocumentVerifier implements IInboundDocumentVerifierSPI, IOutb
       if (aResponseBytes == null)
       {
         LOGGER.error ("Phorm returned null response for '" + sDocumentPath + "'");
-        return ESuccess.FAILURE;
+        return PhormCallResult.FAILED;
       }
 
       final IJsonObject aJson = JsonReader.builder ().source (aResponseBytes).readAsObject ();
       if (aJson == null)
       {
         LOGGER.error ("Failed to parse Phorm response as JSON for '" + sDocumentPath + "'");
-        return ESuccess.FAILURE;
+        return PhormCallResult.FAILED;
       }
 
       final ValidationResultList aResultList = PhiveJsonHelper.getAsValidationResultList (aJson);
       if (aResultList == null)
       {
         LOGGER.error ("Failed to extract validation results from Phorm response for '" + sDocumentPath + "'");
-        return ESuccess.FAILURE;
+        return PhormCallResult.FAILED;
       }
 
-      final EExtendedValidity eValidity = aResultList.getOverallValidity ();
-      if (eValidity == EExtendedValidity.INVALID)
+      if (aResultList.containsAtLeastOneError ())
       {
         LOGGER.warn ("Document '" +
                      sDocumentPath +
@@ -147,16 +173,21 @@ public class PhormDocumentVerifier implements IInboundDocumentVerifierSPI, IOutb
         if (LOGGER.isDebugEnabled ())
           aResultList.getAllErrors ()
                      .forEach (e -> LOGGER.debug ("  Validation error: " + e.getErrorText (CPhossAP.DEFAULT_LOCALE)));
-        return ESuccess.FAILURE;
       }
-
-      LOGGER.info ("Document '" + sDocumentPath + "' passed validation (validity=" + eValidity + ")");
-      return ESuccess.SUCCESS;
+      else
+      {
+        LOGGER.info ("Document '" +
+                     sDocumentPath +
+                     "' passed validation (validity=" +
+                     aResultList.getOverallValidity () +
+                     ")");
+      }
+      return PhormCallResult.completed (aResultList);
     }
     catch (final ExtendedHttpResponseException ex)
     {
       LOGGER.error ("Phorm returned HTTP error for '" + sDocumentPath + "': " + ex.getMessage ());
-      return ESuccess.FAILURE;
+      return PhormCallResult.FAILED;
     }
     catch (final IOException ex)
     {
@@ -167,22 +198,32 @@ public class PhormDocumentVerifier implements IInboundDocumentVerifierSPI, IOutb
                     " (" +
                     ex.getClass ().getName () +
                     ")");
-      return ESuccess.FAILURE;
+      return PhormCallResult.FAILED;
     }
     catch (final Exception ex)
     {
       LOGGER.error ("Unexpected error calling Phorm for '" + sDocumentPath + "'", ex);
-      return ESuccess.FAILURE;
+      return PhormCallResult.FAILED;
     }
   }
 
   /** {@inheritDoc} */
-  @NonNull
-  public ESuccess verifyInboundDocument (@NonNull @Nonempty final String sDocumentPath,
-                                         @NonNull final IDocumentTypeIdentifier aDocTypeID,
-                                         @NonNull final IProcessIdentifier aProcessID)
+  @Nullable
+  public MlsOutcome verifyInboundDocument (@NonNull @Nonempty final String sDocumentPath,
+                                           @NonNull final IDocumentTypeIdentifier aDocTypeID,
+                                           @NonNull final IProcessIdentifier aProcessID)
   {
-    return _callPhorm (sDocumentPath);
+    final PhormCallResult aCall = _callPhorm (sDocumentPath);
+    return switch (aCall.state ())
+    {
+      case SKIPPED -> null;
+      case FAILED -> MlsOutcome.rejection ("Document verifier call failed",
+                                           MlsOutcomeIssue.ofNA (EPeppolMLSStatusReasonCode.BUSINESS_RULE_VIOLATION_FATAL,
+                                                                 "Phorm validation service call failed - see server log for details"));
+      case COMPLETED -> PhiveToMlsMapper.toMlsOutcome (aCall.results (),
+                                                       CPhossAP.DEFAULT_LOCALE,
+                                                       "Document validation failed");
+    };
   }
 
   /** {@inheritDoc} */
@@ -191,6 +232,12 @@ public class PhormDocumentVerifier implements IInboundDocumentVerifierSPI, IOutb
                                           @NonNull final IDocumentTypeIdentifier aDocTypeID,
                                           @NonNull final IProcessIdentifier aProcessID)
   {
-    return _callPhorm (sDocumentPath);
+    final PhormCallResult aCall = _callPhorm (sDocumentPath);
+    return switch (aCall.state ())
+    {
+      case SKIPPED -> ESuccess.SUCCESS;
+      case FAILED -> ESuccess.FAILURE;
+      case COMPLETED -> ESuccess.valueOf (aCall.results ().getOverallValidity ().isValid ());
+    };
   }
 }
