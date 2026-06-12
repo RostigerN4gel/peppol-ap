@@ -45,9 +45,11 @@
       <artifactId>phoss-ap-api</artifactId>
     </dependency>
 
+    <!-- Generic ph-telemetry -> OpenTelemetry binding; transitively brings ph-telemetry +
+         opentelemetry-api. -->
     <dependency>
-      <groupId>io.opentelemetry</groupId>
-      <artifactId>opentelemetry-api</artifactId>
+      <groupId>com.helger.telemetry</groupId>
+      <artifactId>ph-telemetry-otel</artifactId>
     </dependency>
     <dependency>
       <groupId>io.opentelemetry</groupId>

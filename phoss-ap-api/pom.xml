@@ -57,7 +57,7 @@
       <artifactId>ph-json</artifactId>
     </dependency>
     <dependency>
-      <groupId>com.helger.commons</groupId>
+      <groupId>com.helger.telemetry</groupId>
       <artifactId>ph-telemetry</artifactId>
     </dependency>
     <dependency>

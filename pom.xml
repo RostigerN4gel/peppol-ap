@@ -52,7 +52,7 @@
     <maven.compiler.release>21</maven.compiler.release>
 
     <!-- External dependency versions -->
-    <awssdk.version>2.46.7</awssdk.version>
+    <awssdk.version>2.46.8</awssdk.version>
     <commons-compression.version>1.28.0</commons-compression.version>
     <commons-lang.version>3.20.0</commons-lang.version>
     <failsafe.version>3.3.2</failsafe.version>
@@ -66,18 +66,19 @@
     <opentelemetry.version>1.63.0</opentelemetry.version>
     <opentelemetry-instrumentation.version>2.28.1</opentelemetry-instrumentation.version>
     <postgres.version>42.7.11</postgres.version>
-    <sentry.version>8.43.1</sentry.version>
-    <spring-boot.version>4.0.6</spring-boot.version>
+    <sentry.version>8.43.2</sentry.version>
+    <spring-boot.version>4.1.0</spring-boot.version>
     <springdoc.version>3.0.3</springdoc.version>
     <!-- Aligned with the minor version pulled in transitively by springdoc -->
     <swagger-annotations.version>2.2.50</swagger-annotations.version>
     <sshd-sftp.version>2.18.0</sshd-sftp.version>
 
     <ph-commons.version>12.3.0</ph-commons.version>
+    <ph-telemetry.version>1.0.0</ph-telemetry.version>
     <ph-db.version>8.4.0</ph-db.version>
     <ph-web.version>11.4.1</ph-web.version>
     <ph-oton.version>10.2.3</ph-oton.version>
-    <peppol-commons.version>12.5.0</peppol-commons.version>
+    <peppol-commons.version>12.5.2</peppol-commons.version>
     <phive.version>12.0.3</phive.version>
     <phase4.version>4.5.1</phase4.version>
     <ddd.version>0.8.9</ddd.version>
@@ -92,6 +93,13 @@
         <groupId>com.helger.commons</groupId>
         <artifactId>ph-commons-parent-pom</artifactId>
         <version>${ph-commons.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+      <dependency>
+        <groupId>com.helger.telemetry</groupId>
+        <artifactId>ph-telemetry-parent-pom</artifactId>
+        <version>${ph-telemetry.version}</version>
         <type>pom</type>
         <scope>import</scope>
       </dependency>

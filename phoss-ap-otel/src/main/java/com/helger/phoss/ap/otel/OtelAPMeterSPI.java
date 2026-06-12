@@ -19,20 +19,20 @@ package com.helger.phoss.ap.otel;
 import com.helger.annotation.style.IsSPIImplementation;
 import com.helger.phoss.ap.api.CPhossAPVersion;
 import com.helger.phoss.ap.api.otel.CPhossAPOtel;
-import com.helger.telemetry.otel.OtelTelemetryTracerSPI;
+import com.helger.telemetry.otel.OtelTelemetryMeterSPI;
 
 /**
- * Project-specific concrete {@link OtelTelemetryTracerSPI} that wires the phoss AP instrumentation
+ * Project-specific concrete {@link OtelTelemetryMeterSPI} that wires the phoss AP instrumentation
  * scope name + version into the generic ph-telemetry-otel binding. Registered via
- * {@code META-INF/services/com.helger.telemetry.ITelemetryTracerSPI}.
+ * {@code META-INF/services/com.helger.telemetry.ITelemetryMeterSPI}.
  *
  * @author Philip Helger
- * @since 0.9.0
+ * @since 0.10.0
  */
 @IsSPIImplementation
-public final class OtelAPTracerSPI extends OtelTelemetryTracerSPI
+public final class OtelAPMeterSPI extends OtelTelemetryMeterSPI
 {
-  public OtelAPTracerSPI ()
+  public OtelAPMeterSPI ()
   {
     super (CPhossAPOtel.INSTRUMENTATION_SCOPE_NAME, CPhossAPVersion.BUILD_VERSION);
   }

@@ -25,11 +25,6 @@ import org.springframework.context.ApplicationListener;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-import com.helger.phoss.ap.core.notification.LifecycleEventManager;
-import com.helger.phoss.ap.core.notification.NotificationHandlerManager;
-import com.helger.phoss.ap.otel.APLifecycleEventHandlerOtel;
-import com.helger.phoss.ap.otel.APNotificationHandlerOtel;
-
 import io.opentelemetry.api.OpenTelemetry;
 import io.opentelemetry.sdk.autoconfigure.AutoConfiguredOpenTelemetrySdk;
 
@@ -59,17 +54,16 @@ public class OtelConfig
   {
     LOGGER.info ("Initializing OpenTelemetry via SDK autoconfigure");
 
-    // setResultAsGlobal=true makes GlobalOpenTelemetry.get () return this instance, so the
-    // PhossAPTelemetry helper resolves it automatically.
+    // setResultAsGlobal=true makes GlobalOpenTelemetry.get() return this instance, so the
+    // OtelAPTracerSPI / OtelAPMeterSPI bindings (loaded via ServiceLoader by the ph-telemetry
+    // facades) resolve it automatically. The metric/notification handlers themselves live in
+    // phoss-ap-core and are registered via META-INF/services there.
     final OpenTelemetry aOtel = AutoConfiguredOpenTelemetrySdk.builder ()
                                                               .setResultAsGlobal ()
                                                               .build ()
                                                               .getOpenTelemetrySdk ();
 
     LOGGER.info ("Successfully installed the OpenTelemetry SDK: " + aOtel.getClass ().getName ());
-
-    NotificationHandlerManager.registerHandler (new APNotificationHandlerOtel ());
-    LifecycleEventManager.registerHandler (new APLifecycleEventHandlerOtel ());
   }
 
   /**

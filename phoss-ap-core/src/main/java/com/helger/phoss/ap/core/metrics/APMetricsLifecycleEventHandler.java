@@ -14,7 +14,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package com.helger.phoss.ap.otel;
+package com.helger.phoss.ap.core.metrics;
 
 import java.time.Duration;
 import java.time.YearMonth;
@@ -23,33 +23,35 @@ import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
 import com.helger.annotation.Nonnegative;
+import com.helger.annotation.style.IsSPIImplementation;
 import com.helger.peppol.mls.EPeppolMLSResponseCode;
 import com.helger.phoss.ap.api.otel.CPhossAPOtel;
 import com.helger.phoss.ap.api.spi.IAPLifecycleEventSPI;
-
-import io.opentelemetry.api.common.Attributes;
+import com.helger.telemetry.TelemetryAttributes;
 
 /**
- * Implementation of {@link IAPLifecycleEventSPI} that records OpenTelemetry counters and histograms
- * for positive AP lifecycle events. Wired explicitly via Spring configuration in the webapp module
- * when OTel is enabled.
+ * Implementation of {@link IAPLifecycleEventSPI} that records positive lifecycle counters and
+ * histograms. Records through the vendor-neutral {@code ph-telemetry} abstraction — when no meter
+ * SPI is registered, every call is a no-op, so this handler is always safe to load.
  * <p>
  * Cardinality discipline: high-cardinality Peppol identifiers (sender, receiver, doctype, process,
  * SBDH instance ID, transaction ID) are intentionally <em>not</em> attached as metric attributes —
  * they would explode the cardinality of the metrics backend. They appear on spans (which can
  * tolerate high cardinality) when manual instrumentation is added to the relevant call sites.
+ * <p>
+ * Registered via {@code META-INF/services} and picked up by
+ * {@link com.helger.phoss.ap.core.notification.LifecycleEventManager#initSPI()}.
  *
  * @author Philip Helger
- * @since 0.9.0
  */
-public class APLifecycleEventHandlerOtel implements IAPLifecycleEventSPI
+@IsSPIImplementation
+public class APMetricsLifecycleEventHandler implements IAPLifecycleEventSPI
 {
   private static double _toSeconds (@NonNull final Duration aDuration)
   {
     return aDuration.toNanos () / 1_000_000_000.0;
   }
 
-  /** {@inheritDoc} */
   public void onInboundDocumentReceived (@NonNull final String sTransactionID,
                                          @NonNull final String sSenderID,
                                          @NonNull final String sReceiverID,
@@ -59,53 +61,51 @@ public class APLifecycleEventHandlerOtel implements IAPLifecycleEventSPI
                                          final boolean bIsDuplicateAS4,
                                          final boolean bIsDuplicateSBDH)
   {
-    final Attributes aAttrs = Attributes.builder ()
-                                        .put (CPhossAPOtel.ATTR_IS_DUPLICATE_AS4, bIsDuplicateAS4)
-                                        .put (CPhossAPOtel.ATTR_IS_DUPLICATE_SBDH, bIsDuplicateSBDH)
-                                        .build ();
-    PhossAPTelemetry.inboundReceived ().add (1, aAttrs);
+    final TelemetryAttributes aAttrs = TelemetryAttributes.builder ()
+                                                          .put (CPhossAPOtel.ATTR_IS_DUPLICATE_AS4, bIsDuplicateAS4)
+                                                          .put (CPhossAPOtel.ATTR_IS_DUPLICATE_SBDH, bIsDuplicateSBDH)
+                                                          .build ();
+    APMetrics.INBOUND_RECEIVED.add (1, aAttrs);
   }
 
-  /** {@inheritDoc} */
   public void onInboundVerificationAccepted (@NonNull final String sTransactionID,
                                              @NonNull final String sSbdhInstanceID)
   {
-    PhossAPTelemetry.inboundVerificationAccepted ().add (1);
+    APMetrics.INBOUND_VERIFICATION_ACCEPTED.add (1);
   }
 
-  /** {@inheritDoc} */
   public void onOutboundVerificationAccepted (@NonNull final String sSbdhInstanceID)
   {
-    PhossAPTelemetry.outboundVerificationAccepted ().add (1);
+    APMetrics.OUTBOUND_VERIFICATION_ACCEPTED.add (1);
   }
 
-  /** {@inheritDoc} */
   public void onInboundMLSCorrelated (@NonNull final String sMlsTransactionID,
                                       @NonNull final String sReferencedSbdhInstanceID,
                                       @NonNull final EPeppolMLSResponseCode eMlsResponseCode,
                                       @Nullable final Duration aRoundTrip)
   {
-    final Attributes aAttrs = Attributes.builder ()
-                                        .put (CPhossAPOtel.ATTR_MLS_RESPONSE_CODE, eMlsResponseCode.getID ())
-                                        .build ();
-    PhossAPTelemetry.inboundMLSCorrelated ().add (1, aAttrs);
+    final TelemetryAttributes aAttrs = TelemetryAttributes.builder ()
+                                                          .put (CPhossAPOtel.ATTR_MLS_RESPONSE_CODE,
+                                                                eMlsResponseCode.getID ())
+                                                          .build ();
+    APMetrics.INBOUND_MLS_CORRELATED.add (1, aAttrs);
     if (aRoundTrip != null)
-      PhossAPTelemetry.mlsRoundtripDuration ().record (_toSeconds (aRoundTrip), aAttrs);
+      APMetrics.MLS_ROUNDTRIP_DURATION.record (_toSeconds (aRoundTrip), aAttrs);
   }
 
-  /** {@inheritDoc} */
   public void onInboundDocumentForwarded (@NonNull final String sTransactionID,
                                           @NonNull final String sSbdhInstanceID,
                                           @Nullable final Duration aForwardingDuration,
                                           final boolean bIsRetry)
   {
-    final Attributes aAttrs = Attributes.builder ().put (CPhossAPOtel.ATTR_IS_RETRY, bIsRetry).build ();
-    PhossAPTelemetry.inboundForwarded ().add (1, aAttrs);
+    final TelemetryAttributes aAttrs = TelemetryAttributes.builder ()
+                                                          .put (CPhossAPOtel.ATTR_IS_RETRY, bIsRetry)
+                                                          .build ();
+    APMetrics.INBOUND_FORWARDED.add (1, aAttrs);
     if (aForwardingDuration != null)
-      PhossAPTelemetry.inboundForwardingDuration ().record (_toSeconds (aForwardingDuration), aAttrs);
+      APMetrics.INBOUND_FORWARDING_DURATION.record (_toSeconds (aForwardingDuration), aAttrs);
   }
 
-  /** {@inheritDoc} */
   public void onOutboundDocumentAccepted (@NonNull final String sTransactionID,
                                           @NonNull final String sSenderID,
                                           @NonNull final String sReceiverID,
@@ -113,33 +113,34 @@ public class APLifecycleEventHandlerOtel implements IAPLifecycleEventSPI
                                           @NonNull final String sProcessID,
                                           @NonNull final String sSbdhInstanceID)
   {
-    PhossAPTelemetry.outboundAccepted ().add (1);
+    APMetrics.OUTBOUND_ACCEPTED.add (1);
   }
 
-  /** {@inheritDoc} */
   public void onOutboundDocumentSent (@NonNull final String sTransactionID,
                                       @NonNull final String sSbdhInstanceID,
                                       @Nullable final Duration aSendingDuration,
                                       @Nonnegative final int nAttempts)
   {
-    PhossAPTelemetry.outboundSent ().add (1);
+    APMetrics.OUTBOUND_SENT.add (1);
     if (aSendingDuration != null)
-      PhossAPTelemetry.outboundSendingDuration ().record (_toSeconds (aSendingDuration));
-    PhossAPTelemetry.outboundSendingAttempts ().record (nAttempts);
+      APMetrics.OUTBOUND_SENDING_DURATION.record (_toSeconds (aSendingDuration));
+    APMetrics.OUTBOUND_SENDING_ATTEMPTS.record (nAttempts);
   }
 
-  /** {@inheritDoc} */
   public void onPeppolReportingTSRSuccess (@NonNull final YearMonth aYearMonth)
   {
-    PhossAPTelemetry.reportingSuccess ()
-                    .add (1, Attributes.builder ().put (CPhossAPOtel.ATTR_REPORT_TYPE, "TSR").build ());
+    APMetrics.REPORTING_SUCCESS.add (1,
+                                     TelemetryAttributes.builder ()
+                                                        .put (CPhossAPOtel.ATTR_REPORT_TYPE, "TSR")
+                                                        .build ());
   }
 
-  /** {@inheritDoc} */
   public void onPeppolReportingEUSRSuccess (@NonNull final YearMonth aYearMonth)
   {
-    PhossAPTelemetry.reportingSuccess ()
-                    .add (1, Attributes.builder ().put (CPhossAPOtel.ATTR_REPORT_TYPE, "EUSR").build ());
+    APMetrics.REPORTING_SUCCESS.add (1,
+                                     TelemetryAttributes.builder ()
+                                                        .put (CPhossAPOtel.ATTR_REPORT_TYPE, "EUSR")
+                                                        .build ());
   }
 
   private static void _recordSchedulerCycle (@NonNull final String sSchedulerName,
@@ -147,15 +148,14 @@ public class APLifecycleEventHandlerOtel implements IAPLifecycleEventSPI
                                              @Nonnegative final int nItems,
                                              @NonNull final Duration aCycleDuration)
   {
-    final Attributes aAttrs = Attributes.builder ()
-                                        .put (CPhossAPOtel.ATTR_SCHEDULER_NAME, sSchedulerName)
-                                        .put (CPhossAPOtel.ATTR_IS_OUTBOUND, bIsOutbound)
-                                        .build ();
-    PhossAPTelemetry.schedulerCycleDuration ().record (_toSeconds (aCycleDuration), aAttrs);
-    PhossAPTelemetry.schedulerCycleItems ().record (nItems, aAttrs);
+    final TelemetryAttributes aAttrs = TelemetryAttributes.builder ()
+                                                          .put (CPhossAPOtel.ATTR_SCHEDULER_NAME, sSchedulerName)
+                                                          .put (CPhossAPOtel.ATTR_IS_OUTBOUND, bIsOutbound)
+                                                          .build ();
+    APMetrics.SCHEDULER_CYCLE_DURATION.record (_toSeconds (aCycleDuration), aAttrs);
+    APMetrics.SCHEDULER_CYCLE_ITEMS.record (nItems, aAttrs);
   }
 
-  /** {@inheritDoc} */
   public void onRetrySchedulerCycle (final boolean bIsOutbound,
                                      @Nonnegative final int nProcessed,
                                      @NonNull final Duration aCycleDuration)
@@ -163,7 +163,6 @@ public class APLifecycleEventHandlerOtel implements IAPLifecycleEventSPI
     _recordSchedulerCycle ("retry", bIsOutbound, nProcessed, aCycleDuration);
   }
 
-  /** {@inheritDoc} */
   public void onArchivalSchedulerCycle (final boolean bIsOutbound,
                                         @Nonnegative final int nArchived,
                                         @NonNull final Duration aCycleDuration)
@@ -171,7 +170,6 @@ public class APLifecycleEventHandlerOtel implements IAPLifecycleEventSPI
     _recordSchedulerCycle ("archival", bIsOutbound, nArchived, aCycleDuration);
   }
 
-  /** {@inheritDoc} */
   public void onCleanupSchedulerCycle (final boolean bIsOutbound,
                                        @Nonnegative final int nDeleted,
                                        @NonNull final Duration aCycleDuration)
