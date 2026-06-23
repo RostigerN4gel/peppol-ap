@@ -21,7 +21,10 @@ import java.io.InputStream;
 
 import org.apache.hc.client5.http.classic.methods.HttpPost;
 import org.apache.hc.core5.http.ContentType;
+import org.apache.hc.core5.http.HttpEntity;
+import org.apache.hc.core5.http.io.entity.EntityUtils;
 import org.apache.hc.core5.http.io.entity.InputStreamEntity;
+import org.apache.hc.core5.http.message.StatusLine;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
@@ -29,6 +32,7 @@ import org.slf4j.LoggerFactory;
 
 import com.helger.annotation.Nonempty;
 import com.helger.annotation.style.IsSPIImplementation;
+import com.helger.base.numeric.mutable.MutableInt;
 import com.helger.base.state.ESuccess;
 import com.helger.base.string.StringHelper;
 import com.helger.base.url.URLHelper;
@@ -37,7 +41,6 @@ import com.helger.http.CHttpHeader;
 import com.helger.httpclient.HttpClientManager;
 import com.helger.httpclient.HttpClientSettings;
 import com.helger.httpclient.response.ExtendedHttpResponseException;
-import com.helger.httpclient.response.ResponseHandlerByteArray;
 import com.helger.json.IJsonObject;
 import com.helger.json.serialize.JsonReader;
 import com.helger.peppol.mls.EPeppolMLSStatusReasonCode;
@@ -138,28 +141,47 @@ public class PhormDocumentVerifier implements IInboundDocumentVerifierSPI, IOutb
       final HttpPost aPost = new HttpPost (sURL);
       aPost.setEntity (new InputStreamEntity (aDocumentIS, ContentType.APPLICATION_XML));
       aPost.setHeader (CHttpHeader.ACCEPT, ContentType.APPLICATION_JSON.getMimeType ());
-      aPost.setHeader (HTTP_HEADER_X_TOKEN, sPhormToken);
+      if (StringHelper.isNotEmpty (sPhormToken))
+        aPost.setHeader (HTTP_HEADER_X_TOKEN, sPhormToken);
 
       LOGGER.info ("Calling Phorm at '" + sURL + "' for document '" + sDocumentPath + "'");
 
-      final byte [] aResponseBytes = aHttpClientMgr.execute (aPost, new ResponseHandlerByteArray ());
+      final MutableInt aStatusCode = new MutableInt (0);
+      final byte [] aResponseBytes = aHttpClientMgr.execute (aPost, aHttpResponse -> {
+        final StatusLine aStatusLine = new StatusLine (aHttpResponse);
+        aStatusCode.set (aStatusLine.getStatusCode ());
+        // Skip all server side errors
+        if (aStatusLine.getStatusCode () >= 500)
+          return null;
+
+        // Phorm return 400 in case of invalid validations
+        final HttpEntity aEntity = aHttpResponse.getEntity ();
+        return EntityUtils.toByteArray (aEntity);
+      });
       if (aResponseBytes == null)
       {
-        LOGGER.error ("Phorm returned null response for '" + sDocumentPath + "'");
+        LOGGER.error ("Phorm returned null response for '" + sDocumentPath + "' with code " + aStatusCode.intValue ());
         return PhormCallResult.FAILED;
       }
 
       final IJsonObject aJson = JsonReader.builder ().source (aResponseBytes).readAsObject ();
       if (aJson == null)
       {
-        LOGGER.error ("Failed to parse Phorm response as JSON for '" + sDocumentPath + "'");
+        LOGGER.error ("Failed to parse Phorm response as JSON for '" +
+                      sDocumentPath +
+                      "' with code " +
+                      aStatusCode.intValue ());
         return PhormCallResult.FAILED;
       }
 
+      // Parse JSON back to data structure
       final ValidationResultList aResultList = PhiveJsonHelper.getAsValidationResultList (aJson);
       if (aResultList == null)
       {
-        LOGGER.error ("Failed to extract validation results from Phorm response for '" + sDocumentPath + "'");
+        LOGGER.error ("Failed to extract validation results from Phorm response for '" +
+                      sDocumentPath +
+                      "' with code " +
+                      aStatusCode.intValue ());
         return PhormCallResult.FAILED;
       }
 
