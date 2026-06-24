@@ -52,7 +52,7 @@
     <maven.compiler.release>21</maven.compiler.release>
 
     <!-- External dependency versions -->
-    <awssdk.version>2.46.15</awssdk.version>
+    <awssdk.version>2.46.17</awssdk.version>
     <commons-compression.version>1.28.0</commons-compression.version>
     <commons-lang.version>3.20.0</commons-lang.version>
     <failsafe.version>3.3.2</failsafe.version>
@@ -70,7 +70,7 @@
     <spring-boot.version>4.1.0</spring-boot.version>
     <springdoc.version>3.0.3</springdoc.version>
     <!-- Aligned with the minor version pulled in transitively by springdoc -->
-    <swagger-annotations.version>2.2.51</swagger-annotations.version>
+    <swagger-annotations.version>2.2.52</swagger-annotations.version>
     <sshd-sftp.version>2.18.0</sshd-sftp.version>
 
     <ph-commons.version>12.3.0</ph-commons.version>
