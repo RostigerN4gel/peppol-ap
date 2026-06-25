@@ -37,6 +37,8 @@ import com.helger.base.state.ESuccess;
 import com.helger.base.string.StringHelper;
 import com.helger.base.url.URLHelper;
 import com.helger.config.IConfig;
+import com.helger.diagnostics.error.IError;
+import com.helger.diagnostics.error.level.EErrorLevel;
 import com.helger.http.CHttpHeader;
 import com.helger.httpclient.HttpClientManager;
 import com.helger.httpclient.HttpClientSettings;
@@ -187,11 +189,15 @@ public class PhormDocumentVerifier implements IInboundDocumentVerifierSPI, IOutb
 
       if (aResultList.containsAtLeastOneError ())
       {
+        final int nErrors = aResultList.getAllCount (IError::isError);
+        final int nWarns = aResultList.getAllCount (x -> x.getErrorLevel ().isEQ (EErrorLevel.WARN));
         LOGGER.warn ("Document '" +
                      sDocumentPath +
                      "' failed validation. " +
-                     aResultList.getAllErrors ().size () +
-                     " error(s) found");
+                     nErrors +
+                     (nErrors == 1 ? " error" : " errors") +
+                     (nWarns == 0 ? "" : " and " + nWarns + (nWarns == 1 ? " warning" : " warnings")) +
+                     " found");
         if (LOGGER.isDebugEnabled ())
         {
           aResultList.getAllErrors ()

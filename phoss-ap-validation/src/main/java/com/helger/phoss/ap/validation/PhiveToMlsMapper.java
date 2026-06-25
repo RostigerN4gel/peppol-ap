@@ -124,8 +124,7 @@ public final class PhiveToMlsMapper
   {
     return aError.getErrorLevel ().isEQ (EErrorLevel.WARN) &&
            "Transformation warning".equals (aError.getErrorText (CPhossAP.DEFAULT_LOCALE)) &&
-           aError.getLinkedException () != null &&
-           "net.sf.saxon.trans.XPathException".equals (aError.getLinkedException ().getClass ().getName ());
+           aError.getLinkedException () != null;
   }
 
   /**
