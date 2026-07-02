@@ -18,6 +18,7 @@ package com.helger.phoss.ap.forwarding.s3;
 
 import java.io.InputStream;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 
 import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
@@ -28,8 +29,10 @@ import com.helger.base.state.ESuccess;
 import com.helger.base.string.StringHelper;
 import com.helger.base.tostring.ToStringGenerator;
 import com.helger.config.fallback.IConfigWithFallback;
+import com.helger.json.serialize.JsonWriterSettings;
 import com.helger.mime.CMimeType;
 import com.helger.phoss.ap.api.config.APConfigurationProperties;
+import com.helger.phoss.ap.api.dto.InboundTransactionResponse;
 import com.helger.phoss.ap.api.mgr.IDocumentForwarder;
 import com.helger.phoss.ap.api.mgr.IDocumentPayloadManager;
 import com.helger.phoss.ap.api.model.ForwardingResult;
@@ -63,6 +66,7 @@ public class S3DocumentForwarder implements IDocumentForwarder
   private static final String SUFFIX_S3_ENDPOINT = "s3.endpoint";
   private static final String SUFFIX_S3_PATH_STYLE_ACCESS = "s3.path-style-access";
   private static final String SUFFIX_S3_KEY_PREFIX = "s3.key-prefix";
+  private static final String SUFFIX_S3_WRITE_METADATA = "s3.write-metadata";
 
   private Region m_aRegion;
   private String m_sBucket;
@@ -71,6 +75,7 @@ public class S3DocumentForwarder implements IDocumentForwarder
   private String m_sKeyPrefix;
   private String m_sEndpoint;
   private boolean m_bPathStyleAccess;
+  private boolean m_bWriteMetadata;
 
   /** {@inheritDoc} */
   @NonNull
@@ -99,6 +104,8 @@ public class S3DocumentForwarder implements IDocumentForwarder
     m_sEndpoint = aConfig.getAsString (sKeyPrefix + SUFFIX_S3_ENDPOINT);
     m_bPathStyleAccess = aConfig.getAsBoolean (sKeyPrefix + SUFFIX_S3_PATH_STYLE_ACCESS,
                                                APConfigurationProperties.FORWARDING_S3_PATH_STYLE_ACCESS_DEFAULT);
+    m_bWriteMetadata = aConfig.getAsBoolean (sKeyPrefix + SUFFIX_S3_WRITE_METADATA,
+                                             APConfigurationProperties.FORWARDING_S3_WRITE_METADATA_DEFAULT);
 
     m_sKeyPrefix = aConfig.getAsString (sKeyPrefix + SUFFIX_S3_KEY_PREFIX);
     if (StringHelper.isNotEmpty (m_sKeyPrefix))
@@ -109,6 +116,45 @@ public class S3DocumentForwarder implements IDocumentForwarder
     else
       m_sKeyPrefix = "";
     return ESuccess.SUCCESS;
+  }
+
+  /**
+   * Write a JSON metadata sidecar object next to the uploaded SBD. The content mirrors the metadata
+   * JSON written by the filesystem and SFTP forwarders. A failure to write the sidecar is logged
+   * but does not fail the overall forwarding.
+   *
+   * @param aS3Client
+   *        The S3 client to use for the upload. May not be <code>null</code>.
+   * @param aTransaction
+   *        The transaction to write the metadata for. May not be <code>null</code>.
+   * @param sMetaKey
+   *        The S3 object key of the sidecar (including the ".json" extension). May not be
+   *        <code>null</code>.
+   */
+  private void _writeMetadataSidecar (@NonNull final S3Client aS3Client,
+                                      @NonNull final IInboundTransaction aTransaction,
+                                      @NonNull final String sMetaKey)
+  {
+    final String sJson = InboundTransactionResponse.fromDomain (aTransaction)
+                                                   .getAsJson ()
+                                                   .getAsJsonString (JsonWriterSettings.DEFAULT_SETTINGS_FORMATTED);
+    final byte [] aJsonBytes = sJson.getBytes (StandardCharsets.UTF_8);
+
+    final PutObjectRequest aMetaReq = PutObjectRequest.builder ()
+                                                      .bucket (m_sBucket)
+                                                      .key (sMetaKey)
+                                                      .contentType (CMimeType.APPLICATION_JSON.getAsString ())
+                                                      .build ();
+
+    final var aMetaResult = aS3Client.putObject (aMetaReq, RequestBody.fromBytes (aJsonBytes));
+    if (!aMetaResult.sdkHttpResponse ().isSuccessful ())
+      LOGGER.error ("Failed to write S3 metadata sidecar for transaction '" +
+                    aTransaction.getID () +
+                    "' to S3 bucket '" +
+                    m_sBucket +
+                    "' and key '" +
+                    sMetaKey +
+                    "'");
   }
 
   @NonNull
@@ -132,7 +178,8 @@ public class S3DocumentForwarder implements IDocumentForwarder
       try (final S3Client aS3Client = aBuilder.build ();
            final InputStream aDocumentIS = aDocPayloadMgr.openDocumentStreamForRead (aTransaction.getDocumentPath ()))
       {
-        final String sKey = m_sKeyPrefix + aTransaction.getSbdhInstanceID () + ".xml";
+        final String sBaseKey = m_sKeyPrefix + aTransaction.getSbdhInstanceID ();
+        final String sKey = sBaseKey + ".xml";
 
         final PutObjectRequest aPutReq = PutObjectRequest.builder ()
                                                          .bucket (m_sBucket)
@@ -162,6 +209,11 @@ public class S3DocumentForwarder implements IDocumentForwarder
                      "' and key '" +
                      sKey +
                      "'");
+
+        // Optionally write a metadata JSON sidecar next to the uploaded SBD
+        if (m_bWriteMetadata)
+          _writeMetadataSidecar (aS3Client, aTransaction, sBaseKey + ".json");
+
         return ForwardingResult.success ();
       }
     }
@@ -200,6 +252,7 @@ public class S3DocumentForwarder implements IDocumentForwarder
     return new ToStringGenerator (this).append ("Region", m_aRegion)
                                        .append ("Bucket", m_sBucket)
                                        .append ("PathStyleAccess", m_bPathStyleAccess)
+                                       .append ("WriteMetadata", m_bWriteMetadata)
                                        .getToString ();
   }
 }

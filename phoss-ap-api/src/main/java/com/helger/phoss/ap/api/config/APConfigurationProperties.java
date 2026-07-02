@@ -166,6 +166,8 @@ public final class APConfigurationProperties
   @Deprecated (forRemoval = true, since = "0.9.0")
   public static final String FORWARDING_S3_PATH_STYLE_ACCESS = "forwarding.s3.path-style-access";
   public static final boolean FORWARDING_S3_PATH_STYLE_ACCESS_DEFAULT = false;
+  /** @since 0.10.2 */
+  public static final boolean FORWARDING_S3_WRITE_METADATA_DEFAULT = false;
 
   // Forwarding - Filesystem (since 0.2.0)
   @Deprecated (forRemoval = true, since = "0.9.0")
