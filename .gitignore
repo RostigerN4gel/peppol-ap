@@ -15,3 +15,5 @@ zz
 lgtm-container/
 .lgtm-env
 run-lgtm.sh
+/.vscode
+build-output.log

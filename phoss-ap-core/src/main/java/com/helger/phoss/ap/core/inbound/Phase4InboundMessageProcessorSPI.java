@@ -99,6 +99,9 @@ public class Phase4InboundMessageProcessorSPI implements IPhase4PeppolIncomingSB
 
     final String sLogPrefix = "[" + aMessageMetadata.getIncomingUniqueID () + "] ";
     Phase4LogCustomizer.setThreadLocalLogPrefix (sLogPrefix);
+    // Fork extension: expose the original AS4 HTTP request headers to a deployment-provided
+    // document forwarder during the synchronous first forwarding attempt (same thread).
+    InboundHttpHeaderContext.set (aHeaders);
     try
     {
       // Adapt the AS4 transport message timestamp to a domain timestamp
@@ -124,6 +127,7 @@ public class Phase4InboundMessageProcessorSPI implements IPhase4PeppolIncomingSB
     }
     finally
     {
+      InboundHttpHeaderContext.clear ();
       Phase4LogCustomizer.clearThreadLocals ();
     }
   }
