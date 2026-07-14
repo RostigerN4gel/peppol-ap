@@ -824,7 +824,12 @@ public final class OutboundOrchestrator
                 aSendingReport.setAS4SendingResult (eResult);
                 LOGGER.info (sRealLogPrefix + "Peppol SBDH-building client send result: " + eResult);
 
-                aReportingItem = aBuilder.createPeppolReportingItemAfterSending (aSenderID.getURIEncoded ());
+                // Only create the Reporting item if sending actually succeeded. On failure
+                // createPeppolReportingItemAfterSending throws "A Peppol Reporting item can only
+                // be created AFTER sending", which would mask the real transport exception
+                // captured in aCaughtSendingEx and handled below.
+                if (eResult.isSuccess () && aCaughtSendingEx.isNotSet ())
+                  aReportingItem = aBuilder.createPeppolReportingItemAfterSending (aSenderID.getURIEncoded ());
                 break;
               }
               case PREBUILT_SBD:
@@ -920,7 +925,12 @@ public final class OutboundOrchestrator
                 aSendingReport.setAS4SendingResult (eResult);
                 LOGGER.info (sRealLogPrefix + "Peppol Prebuilt-SBDH client send result: " + eResult);
 
-                aReportingItem = aBuilder.createPeppolReportingItemAfterSending (aSenderID.getURIEncoded ());
+                // Only create the Reporting item if sending actually succeeded. On failure
+                // createPeppolReportingItemAfterSending throws "A Peppol Reporting item can only
+                // be created AFTER sending", which would mask the real transport exception
+                // captured in aCaughtSendingEx and handled below.
+                if (eResult.isSuccess () && aCaughtSendingEx.isNotSet ())
+                  aReportingItem = aBuilder.createPeppolReportingItemAfterSending (aSenderID.getURIEncoded ());
                 break;
               }
               default:
