@@ -67,11 +67,18 @@ cd "$REPO_ROOT"
 
 # --- Locate and export the fat jar ------------------------------------------
 TARGET_DIR="$REPO_ROOT/$MODULE/target"
-JAR=$(ls -1t "$TARGET_DIR"/phoss-ap-webapp-*.jar 2>/dev/null \
-        | grep -v -- '-sources.jar' \
-        | grep -v -- '-javadoc.jar' \
-        | grep -v -- '.jar.original' \
-        | head -n 1)
+# Pick the newest runnable jar, excluding -sources / -javadoc / .original artifacts.
+JAR=""
+for f in "$TARGET_DIR"/phoss-ap-webapp-*.jar; do
+  # Skip the unexpanded glob (no match) and the auxiliary artifacts.
+  [ -f "$f" ] || continue
+  case "$f" in
+    *-sources.jar | *-javadoc.jar | *.jar.original) continue ;;
+  esac
+  if [ -z "$JAR" ] || [ "$f" -nt "$JAR" ]; then
+    JAR="$f"
+  fi
+done
 
 if [ -z "$JAR" ] || [ ! -f "$JAR" ]; then
   echo "ERROR: build succeeded but no runnable jar found in $TARGET_DIR" >&2

@@ -69,11 +69,12 @@ There are **two** configuration systems, both fed from the same properties files
    and system properties.
 
 **Profile-specific config:** `SpringProfileConfigIntegration` bridges Spring profiles into ph-config.
-Activating profile `dev` (`--spring.profiles.active=dev`) loads **`dev_application.properties`** in
-addition to `application.properties`. `dev_application.properties` lives in
-`phoss-ap-webapp/src/main/resources/`, is **git-ignored** (contains secrets), and is **baked into the
-jar** at build time — so changing it requires a rebuild. `application.properties` is the committed
-template with `[CHANGEME]` markers.
+Activating profile `dev` (`--spring.profiles.active=dev`) loads **`application-dev.properties`** in
+addition to `application.properties`. The filename convention is `application-<profile>.properties`
+(resolved by `ConfigFactory.addProfilePropertiesSources` in ph-config). `application-dev.properties`
+lives in `phoss-ap-webapp/src/main/resources/`, is **git-ignored** (contains secrets), and is **baked
+into the jar** at build time — so changing it requires a rebuild. `application.properties` is the
+committed template with `[CHANGEME]` markers.
 
 ## Persistence
 
@@ -105,7 +106,7 @@ answered by a `ProcessResult` XML). See [CUSTOMIZATIONS.md](docs/CUSTOMIZATIONS.
 ## Repo-specific notes
 
 - `helper/` holds the build/start/stop scripts (POSIX `sh`, target a Linux `/opt/tomcat` daemon).
-- `dist/` receives the exported jar from `build-phoss-ap.sh`. The jar embeds `dev_application.properties`
+- `dist/` receives the exported jar from `build-phoss-ap.sh`. The jar embeds `application-dev.properties`
   secrets — do not commit `dist/`.
 - Commit messages / PRs: this is a fork; keep upstream-mergeable changes minimal and isolate fork
   changes where practical.

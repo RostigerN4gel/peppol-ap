@@ -5,7 +5,7 @@
 # Replaces the old phase4-peppol-standalone start script. Differences vs. phase4:
 #   - phoss-ap is a Spring Boot "fat jar" (phoss-ap-webapp-<version>.jar).
 #   - Configuration is NOT passed via -Dconfig.file / --spring.config.location.
-#     phoss-ap uses the "dev" Spring profile to load "dev_application.properties"
+#     phoss-ap uses the "dev" Spring profile to load "application-dev.properties"
 #     (baked into the jar via SpringProfileConfigIntegration -> ph-config).
 #     Individual values can still be overridden through OS environment variables
 #     (e.g. PHOSSAP_JDBC_URL) or an application.properties in the working directory.
@@ -15,7 +15,7 @@ set -e
 
 # --- Configuration (override via environment if needed) ---------------------
 APP_HOME="${APP_HOME:-/opt/tomcat}"
-# Spring profile whose "<profile>_application.properties" gets loaded
+# Spring profile whose "application-<profile>.properties" gets loaded
 SPRING_PROFILE="${SPRING_PROFILE:-dev}"
 # Location of the runnable jar. Auto-detected if not set explicitly.
 APP_JAR="${APP_JAR:-}"
@@ -41,7 +41,16 @@ cd "$APP_HOME"
 # --- Resolve jar ------------------------------------------------------------
 if [ -z "$APP_JAR" ]; then
   # Pick the newest matching fat jar, excluding -sources / -javadoc artifacts.
-  APP_JAR="$(ls -1t phoss-ap-webapp-*.jar 2>/dev/null | grep -v -- '-sources.jar' | grep -v -- '-javadoc.jar' | head -n 1)"
+  for f in phoss-ap-webapp-*.jar; do
+    # Skip the unexpanded glob (no match) and the sources/javadoc artifacts.
+    [ -f "$f" ] || continue
+    case "$f" in
+      *-sources.jar | *-javadoc.jar) continue ;;
+    esac
+    if [ -z "$APP_JAR" ] || [ "$f" -nt "$APP_JAR" ]; then
+      APP_JAR="$f"
+    fi
+  done
 fi
 if [ -z "$APP_JAR" ] || [ ! -f "$APP_JAR" ]; then
   echo "ERROR: phoss-ap jar not found in $APP_HOME (looked for phoss-ap-webapp-*.jar). Set APP_JAR." >&2
@@ -58,6 +67,8 @@ mkdir -p "$PID_DIR" "$LOG_DIR"
 
 # --- Launch as background daemon --------------------------------------------
 echo "Starting phoss-ap: $APP_JAR (profile=$SPRING_PROFILE)"
+# JAVA_OPTS is intentionally word-split into separate arguments.
+# shellcheck disable=SC2086
 "$JAVA" $JAVA_OPTS \
   -jar "$APP_HOME/$APP_JAR" \
   --spring.profiles.active="$SPRING_PROFILE" \
