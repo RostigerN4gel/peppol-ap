@@ -105,7 +105,10 @@ answered by a `ProcessResult` XML). See [CUSTOMIZATIONS.md](docs/CUSTOMIZATIONS.
 
 ## Repo-specific notes
 
-- `helper/` holds the build/start/stop scripts (POSIX `sh`, target a Linux `/opt/tomcat` daemon).
+- `helper/` holds the build/start/stop scripts plus `install-phoss-ap-daemon.sh` /
+  `uninstall-phoss-ap-daemon.sh`, which register the jar as a **systemd** service (enabled on boot,
+  not auto-started). POSIX `sh`, target a Linux `/opt/tomcat` daemon. See
+  [CUSTOMIZATIONS.md](docs/CUSTOMIZATIONS.md#deployment-helper-scripts-fork-specific).
 - `dist/` receives the exported jar from `build-phoss-ap.sh`. The jar embeds `application-dev.properties`
   secrets — do not commit `dist/`.
 - Commit messages / PRs: this is a fork; keep upstream-mergeable changes minimal and isolate fork
