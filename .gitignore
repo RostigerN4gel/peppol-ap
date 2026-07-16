@@ -17,5 +17,6 @@ lgtm-container/
 run-lgtm.sh
 /.vscode
 build-output.log
-phoss-ap-webapp/src/main/resources/dev_application.properties
 /dist
+phoss-ap-webapp/src/main/resources/application-dev.properties
+phoss-ap-webapp/src/main/resources/application-prod.properties
