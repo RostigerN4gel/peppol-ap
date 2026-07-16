@@ -6,7 +6,7 @@ Guidance for AI coding agents working in this repository.
 
 A **fork** of [phax/phoss-ap](https://github.com/phax/phoss-ap) (`upstream` remote) — an
 open-source Peppol Access Point built on phase4, as a Spring Boot application. The fork adds a
-custom inbound document forwarder; see [CUSTOMIZATIONS.md](CUSTOMIZATIONS.md) for the full delta.
+custom inbound document forwarder; see [CUSTOMIZATIONS.md](docs/CUSTOMIZATIONS.md) for the full delta.
 Keep fork-specific changes documented there.
 
 ## Prerequisites (hard requirements)
@@ -90,7 +90,7 @@ This fork uses `forwarding.mode=spi` with the custom `MiddlewareReceiverForwarde
 (`phoss-ap-webapp/.../webapp/middleware/`, SPI id `middleware-data`), registered via
 `META-INF/services/com.helger.phoss.ap.api.spi.IDocumentForwarderProviderSPI`. It speaks a different
 wire contract than the built-in HTTP forwarder (an `InboundPeppolRequest` XML envelope + AS4 headers,
-answered by a `ProcessResult` XML). See [CUSTOMIZATIONS.md](CUSTOMIZATIONS.md) for the rationale.
+answered by a `ProcessResult` XML). See [CUSTOMIZATIONS.md](docs/CUSTOMIZATIONS.md) for the rationale.
 
 ## Code conventions (helger style — match the surrounding code)
 

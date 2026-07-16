@@ -10,26 +10,42 @@ including **MLS** (Message Level Status). The diagrams reflect the actual code:
 - [`OutboundController.java`](../phoss-ap-webapp/src/main/java/com/helger/phoss/ap/webapp/controller/OutboundController.java)
 - [`MlsController.java`](../phoss-ap-webapp/src/main/java/com/helger/phoss/ap/webapp/controller/MlsController.java)
 
-> Fork-specific behaviour is documented in [`CUSTOMIZATIONS.md`](../CUSTOMIZATIONS.md).
+> Fork-specific behaviour is documented in [`CUSTOMIZATIONS.md`](CUSTOMIZATIONS.md).
 
-## 1. Peppol 4-corner model (roles of this AP)
+## 1. Peppol 4-corner model
 
-This AP acts as **C2** (when sending) and as **C3** (when receiving).
+In the Peppol 4-corner model the corner numbers are assigned **per message direction**, not
+fixed to a physical party: **C1** is always the *sender* (originator) of a document, **C2** its
+sending Access Point, **C3** the receiving Access Point and **C4** the *receiver*. The same
+physical Access Point therefore plays **different corners depending on direction**:
+
+- When **sending** (my customer is the originator), my AP is **C2**.
+- When **receiving** (my customer is the recipient), my AP is **C3**.
+
+So "my customer" is **C1** on the outbound path but **C4** on the inbound path; the remote party's
+AP is **C3** outbound but **C2** inbound.
 
 ```mermaid
 flowchart LR
-    C1["C1<br/>Sender backend"] -->|"REST /api/outbound"| C2["C2<br/>THIS AP (sending)"]
-    C2 -->|"AS4 / Peppol"| C3["C3<br/>Remote AP (receiving)"]
-    C3 -->|Backend| C4["C4<br/>Receiver"]
+    subgraph OUT["Outbound — my customer sends (MY AP = C2)"]
+      direction LR
+      O1["C1<br/>Sender backend<br/>(my customer)"] -->|"REST /api/outbound"| O2["C2<br/>MY AP"]
+      O2 -->|"AS4 / Peppol"| O3["C3<br/>Partner AP"]
+      O3 -->|Backend| O4["C4<br/>Receiver<br/>(remote partner)"]
+    end
 
-    RC2["C2<br/>Remote AP (sending)"] -->|"AS4 / Peppol"| RC3["C3<br/>THIS AP (receiving)"]
-    RC3 -->|"InboundPeppolRequest (XML)"| RC4["C4<br/>Middleware receiver"]
+    subgraph IN["Inbound — my customer receives (MY AP = C3)"]
+      direction LR
+      I1["C1<br/>Sender backend<br/>(remote partner)"] -->|"REST"| I2["C2<br/>Partner AP"]
+      I2 -->|"AS4 / Peppol"| I3["C3<br/>MY AP"]
+      I3 -->|"InboundPeppolRequest (XML)"| I4["C4<br/>Middleware receiver<br/>(my customer)"]
+    end
 
-    RC3 -.->|"MLS back"| RC2
-    C3 -.->|"MLS back"| C2
+    O3 -.->|"MLS back"| O2
+    I3 -.->|"MLS back"| I2
 
     classDef me fill:#2563eb,stroke:#1e40af,color:#fff;
-    class C2,RC3 me;
+    class O2,I3 me;
 ```
 
 ## 2. Inbound: receiving a business document (this AP = C3) incl. MLS
@@ -198,4 +214,4 @@ REST endpoints:
 A rejection by the C4 middleware `receiver` does **not** produce an AS4 error back to C2 — at that
 point the AS4 receipt has already been sent positively. The rejection is instead signalled via
 **MLS + transaction status** (shown as "business reject" in diagram 2). See
-[`CUSTOMIZATIONS.md`](../CUSTOMIZATIONS.md), section "Behavioural differences", for details.
+[`CUSTOMIZATIONS.md`](CUSTOMIZATIONS.md), section "Behavioural differences", for details.
