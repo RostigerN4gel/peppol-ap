@@ -14,7 +14,7 @@
 set -e
 
 # --- Configuration (override via environment if needed) ---------------------
-APP_HOME="${APP_HOME:-/opt/tomcat}"
+APP_HOME="${APP_HOME:-/opt/peppol-ap}"
 # Spring profile whose "application-<profile>.properties" gets loaded
 SPRING_PROFILE="${SPRING_PROFILE:-dev}"
 # Location of the runnable jar. Auto-detected if not set explicitly.

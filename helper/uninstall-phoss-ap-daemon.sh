@@ -7,8 +7,11 @@
 #   2. Removes /etc/systemd/system/$SERVICE_NAME.service and reloads systemd.
 #   3. Removes the deployed jar(s) and the stable symlink from $APP_HOME.
 #
-# By default it leaves $APP_HOME, the logs and the service user intact.
-# Set PURGE=1 to also remove $APP_HOME entirely and delete the service user.
+# By default it leaves $APP_HOME and the logs intact.
+# Set PURGE=1 to also remove $APP_HOME entirely.
+#
+# The service user/group (default: ec2-user) is never touched - this script
+# neither creates nor deletes it (it is a pre-existing shared account).
 #
 # Must be run as root. Idempotent - safe to run even if nothing is installed.
 # Counterpart: install-phoss-ap-daemon.sh
@@ -17,9 +20,9 @@
 set -e
 
 # --- Configuration (must match install-phoss-ap-daemon.sh) ------------------
-APP_HOME="${APP_HOME:-/opt/tomcat}"
+APP_HOME="${APP_HOME:-/opt/peppol-ap}"
 SERVICE_NAME="${SERVICE_NAME:-phoss-ap}"
-SERVICE_USER="${SERVICE_USER:-tomcat}"
+SERVICE_USER="${SERVICE_USER:-ec2-user}"
 PURGE="${PURGE:-0}"
 UNIT_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 
@@ -65,22 +68,20 @@ for f in "$APP_HOME"/phoss-ap-webapp-*.jar; do
 done
 
 # --- Optional purge ----------------------------------------------------------
+# Note: the service user/group is a shared, pre-existing account and is never
+# removed, not even with PURGE=1.
 if [ "$PURGE" = "1" ]; then
   if [ -d "$APP_HOME" ]; then
     echo "PURGE: removing $APP_HOME"
     rm -rf "$APP_HOME"
-  fi
-  if id "$SERVICE_USER" >/dev/null 2>&1; then
-    echo "PURGE: deleting service user '$SERVICE_USER'"
-    userdel "$SERVICE_USER" 2>/dev/null || true
   fi
 fi
 
 echo ""
 echo "=== Uninstall complete ==="
 if [ "$PURGE" = "1" ]; then
-  echo "Service, deployed jars, $APP_HOME and user '$SERVICE_USER' removed."
+  echo "Service, deployed jars and $APP_HOME removed. User '$SERVICE_USER' kept (shared account)."
 else
-  echo "Service and deployed jars removed. $APP_HOME, logs and user '$SERVICE_USER' kept."
-  echo "Re-run with PURGE=1 to remove those as well."
+  echo "Service and deployed jars removed. $APP_HOME and logs kept."
+  echo "Re-run with PURGE=1 to remove $APP_HOME as well."
 fi

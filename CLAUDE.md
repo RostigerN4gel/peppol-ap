@@ -25,7 +25,7 @@ mvn clean install -DskipTests
 # Build + export the runnable fat jar into dist/ (recommended)
 JAVA_HOME=/path/to/jdk21 ./helper/build-phoss-ap.sh
 
-# Start / stop the app as a daemon (see helper/ scripts; default APP_HOME=/opt/tomcat)
+# Start / stop the app as a daemon (see helper/ scripts; default APP_HOME=/opt/peppol-ap)
 ./helper/start-phoss-ap.sh
 ./helper/stop-phoss-ap.sh
 ```
@@ -107,7 +107,7 @@ answered by a `ProcessResult` XML). See [CUSTOMIZATIONS.md](docs/CUSTOMIZATIONS.
 
 - `helper/` holds the build/start/stop scripts plus `install-phoss-ap-daemon.sh` /
   `uninstall-phoss-ap-daemon.sh`, which register the jar as a **systemd** service (enabled on boot,
-  not auto-started). POSIX `sh`, target a Linux `/opt/tomcat` daemon. See
+  not auto-started). POSIX `sh`, target a Linux `/opt/peppol-ap` daemon running as `ec2-user`. See
   [CUSTOMIZATIONS.md](docs/CUSTOMIZATIONS.md#deployment-helper-scripts-fork-specific).
 - `dist/` receives the exported jar from `build-phoss-ap.sh`. The jar embeds `application-dev.properties`
   secrets — do not commit `dist/`.

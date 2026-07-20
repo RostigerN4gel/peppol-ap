@@ -4,7 +4,7 @@
 #
 # Produces the runnable Spring Boot "fat jar" (phoss-ap-webapp-<version>.jar)
 # and exports it into an output directory, ready to be deployed next to
-# start-phoss-ap.sh / stop-phoss-ap.sh (default APP_HOME=/opt/tomcat).
+# start-phoss-ap.sh / stop-phoss-ap.sh (default APP_HOME=/opt/peppol-ap).
 #
 # Tests are skipped by default: the full "verify" phase needs a running
 # PostgreSQL (webapp context test) and Docker (Testcontainers S3 IT), which are
@@ -94,5 +94,5 @@ echo "=== Build complete ==="
 echo "Exported: $OUTPUT_DIR/$JAR_NAME"
 echo ""
 echo "Deploy:"
-echo "  cp \"$OUTPUT_DIR/$JAR_NAME\" /opt/tomcat/"
-echo "  ./helper/start-phoss-ap.sh    # or: APP_HOME=/opt/tomcat ./helper/start-phoss-ap.sh"
+echo "  cp \"$OUTPUT_DIR/$JAR_NAME\" /opt/peppol-ap/"
+echo "  ./helper/start-phoss-ap.sh    # or: APP_HOME=/opt/peppol-ap ./helper/start-phoss-ap.sh"

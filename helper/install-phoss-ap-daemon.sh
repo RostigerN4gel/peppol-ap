@@ -5,16 +5,19 @@
 # What it does:
 #   1. Resolves the runnable fat jar (arg, $APP_JAR, or newest phoss-ap-webapp-*.jar
 #      found next to this script / in ../dist / in the current directory).
-#   2. Creates a dedicated system user/group (default: tomcat) if missing.
-#   3. Copies the jar into $APP_HOME and points a stable symlink
+#   2. Copies the jar into $APP_HOME and points a stable symlink
 #      "$APP_HOME/$SERVICE_NAME.jar" at it.
-#   4. Writes /etc/systemd/system/$SERVICE_NAME.service.
-#   5. Runs "systemctl daemon-reload" and "systemctl enable" (start on boot).
+#   3. Writes /etc/systemd/system/$SERVICE_NAME.service.
+#   4. Runs "systemctl daemon-reload" and "systemctl enable" (start on boot).
+#
+# The service user/group (default: ec2-user) is expected to already exist; this
+# script does NOT create or delete it. It can be installed alongside other
+# services (e.g. a tomcat-based one) without conflict.
 #
 # It deliberately does NOT start the service - start it manually with
 #   systemctl start phoss-ap
 #
-# Must be run as root (systemd unit, /opt/tomcat, user creation).
+# Must be run as root (systemd unit, /opt/peppol-ap).
 # Counterpart: uninstall-phoss-ap-daemon.sh
 #
 
@@ -24,9 +27,9 @@ set -e
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
 # --- Configuration (override via environment) -------------------------------
-APP_HOME="${APP_HOME:-/opt/tomcat}"
+APP_HOME="${APP_HOME:-/opt/peppol-ap}"
 SERVICE_NAME="${SERVICE_NAME:-phoss-ap}"
-SERVICE_USER="${SERVICE_USER:-tomcat}"
+SERVICE_USER="${SERVICE_USER:-ec2-user}"
 SERVICE_GROUP="${SERVICE_GROUP:-$SERVICE_USER}"
 # Spring profile whose "application-<profile>.properties" gets loaded
 SPRING_PROFILE="${SPRING_PROFILE:-dev}"
@@ -37,7 +40,7 @@ UNIT_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 
 # --- Require root -----------------------------------------------------------
 if [ "$(id -u)" -ne 0 ]; then
-  echo "ERROR: this installer must be run as root (systemd unit + $APP_HOME + user creation)." >&2
+  echo "ERROR: this installer must be run as root (systemd unit + $APP_HOME)." >&2
   echo "       Retry with: sudo $0" >&2
   exit 1
 fi
@@ -89,16 +92,16 @@ echo "Installing  : $APP_JAR"
 echo "Service     : $SERVICE_NAME (user $SERVICE_USER:$SERVICE_GROUP, profile $SPRING_PROFILE)"
 echo "App home    : $APP_HOME"
 
-# --- Create service group/user if missing -----------------------------------
+# --- Require the service user/group to already exist ------------------------
+# This script does not create (nor delete) the account - the operator is
+# expected to provide it (e.g. the pre-existing 'ec2-user').
 if ! getent group "$SERVICE_GROUP" >/dev/null 2>&1; then
-  echo "Creating system group '$SERVICE_GROUP'"
-  groupadd --system "$SERVICE_GROUP"
+  echo "ERROR: service group '$SERVICE_GROUP' does not exist. Create it first, or set SERVICE_GROUP." >&2
+  exit 1
 fi
 if ! id "$SERVICE_USER" >/dev/null 2>&1; then
-  echo "Creating system user '$SERVICE_USER'"
-  NOLOGIN="$(command -v nologin || echo /usr/sbin/nologin)"
-  useradd --system --gid "$SERVICE_GROUP" --home-dir "$APP_HOME" \
-          --no-create-home --shell "$NOLOGIN" "$SERVICE_USER"
+  echo "ERROR: service user '$SERVICE_USER' does not exist. Create it first, or set SERVICE_USER." >&2
+  exit 1
 fi
 
 # --- Deploy the jar ----------------------------------------------------------

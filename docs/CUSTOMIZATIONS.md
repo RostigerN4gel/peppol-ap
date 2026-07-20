@@ -125,8 +125,8 @@ upstream:
 | Script | Purpose |
 | ------ | ------- |
 | `build-phoss-ap.sh` | Build the runnable fat jar and export it into `dist/` (tests skipped by default; `RUN_TESTS=1` to include). |
-| `install-phoss-ap-daemon.sh` | Install the jar as a **systemd** service. Creates the `tomcat` system user, deploys the jar to `$APP_HOME` (default `/opt/tomcat`) with a stable `phoss-ap.jar` symlink, writes `/etc/systemd/system/phoss-ap.service`, and runs `systemctl enable` (start on boot). **Does not start the service** — start it manually with `systemctl start phoss-ap`. Must run as root. |
-| `uninstall-phoss-ap-daemon.sh` | Stop + disable the service, remove the unit and deployed jars. Keeps `$APP_HOME`/logs/user unless `PURGE=1`. Must run as root. |
+| `install-phoss-ap-daemon.sh` | Install the jar as a **systemd** service. Runs as the pre-existing `ec2-user` user/group (verified but **not** created), deploys the jar to `$APP_HOME` (default `/opt/peppol-ap`) with a stable `phoss-ap.jar` symlink, writes `/etc/systemd/system/phoss-ap.service`, and runs `systemctl enable` (start on boot). **Does not start the service** — start it manually with `systemctl start phoss-ap`. Must run as root. Can be installed alongside other services (e.g. a tomcat-based one) without conflict. |
+| `uninstall-phoss-ap-daemon.sh` | Stop + disable the service, remove the unit and deployed jars. Keeps `$APP_HOME`/logs unless `PURGE=1`. Never touches the shared service user. Must run as root. |
 | `start-phoss-ap.sh` / `stop-phoss-ap.sh` | Lightweight PID-file based start/stop (no systemd) — an alternative to the daemon install for quick/manual runs. |
 
 The systemd unit loads the `dev` Spring profile (so `application-dev.properties`, baked into the jar,
@@ -137,5 +137,5 @@ is applied) and reads optional operator overrides from `$APP_HOME/phoss-ap.env` 
 ```sh
 sudo ./helper/install-phoss-ap-daemon.sh      # install + enable, not started
 sudo systemctl start phoss-ap                  # manual start
-sudo ./helper/uninstall-phoss-ap-daemon.sh     # remove (PURGE=1 to also drop $APP_HOME + user)
+sudo ./helper/uninstall-phoss-ap-daemon.sh     # remove (PURGE=1 to also drop $APP_HOME; user is kept)
 ```

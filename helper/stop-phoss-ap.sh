@@ -8,7 +8,7 @@
 #
 
 # --- Configuration (must match start-phoss-ap.sh; override via environment) --
-APP_HOME="${APP_HOME:-/opt/tomcat}"
+APP_HOME="${APP_HOME:-/opt/peppol-ap}"
 PID_DIR="${PID_DIR:-$APP_HOME/pid}"
 PID_FILE="${PID_FILE:-$PID_DIR/phoss-ap.pid}"
 # Seconds to wait for a graceful shutdown before forcing a kill
