@@ -108,14 +108,6 @@
     </dependency>
 
     <dependency>
-      <groupId>org.postgresql</groupId>
-      <artifactId>postgresql</artifactId>
-      <scope>runtime</scope>
-    </dependency>
-    <!-- DB2 (and its Flyway dialect) is intentionally NOT bundled. It is added at runtime via the
-         /ext extension directory - see the "Runtime Extensions" wiki page. -->
-
-    <dependency>
       <groupId>io.sentry</groupId>
       <artifactId>sentry-logback</artifactId>
       <version>${sentry.version}</version>
