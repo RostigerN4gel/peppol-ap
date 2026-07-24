@@ -135,6 +135,30 @@ public interface IAPNotificationHandlerSPI
                                      @NonNull EPeppolMLSResponseCode eMlsResponseCode);
 
   /**
+   * Called when an outbound MLS cannot be delivered to the requested custom <code>MLS_TO</code>
+   * receiver because that receiver could not be resolved via SMP lookup, and sending falls back to
+   * the default SPID receiver derived from the sending C2's Peppol AP certificate (see MLS SPOG
+   * section 5.4).
+   *
+   * @param sOutboundTransactionID
+   *        The outbound MLS transaction ID. Never <code>null</code>.
+   * @param sReferencedSbdhInstanceID
+   *        The SBDH Instance Identifier of the original business document the MLS refers to. Never
+   *        <code>null</code>.
+   * @param sAttemptedMlsToParticipantID
+   *        The custom <code>MLS_TO</code> receiver participant ID that could not be reached. Never
+   *        <code>null</code>.
+   * @param sFallbackDefaultSpidParticipantID
+   *        The default SPID receiver participant ID used as the fallback target. Never
+   *        <code>null</code>.
+   * @since 0.11.0
+   */
+  void onSpecialMlsToNotReachable (@NonNull String sOutboundTransactionID,
+                                   @NonNull String sReferencedSbdhInstanceID,
+                                   @NonNull String sAttemptedMlsToParticipantID,
+                                   @NonNull String sFallbackDefaultSpidParticipantID);
+
+  /**
    * Called if an inbound messages could not be forwarded properly. The database state has already
    * been updated when this is called.
    *

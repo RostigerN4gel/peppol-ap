@@ -134,6 +134,20 @@ public class APMetricsNotificationHandler implements IAPNotificationHandlerSPI
     APMetrics.INBOUND_MLS_CORRELATION_ERRORS.add (1, aAttrs);
   }
 
+  public void onSpecialMlsToNotReachable (@NonNull final String sOutboundTransactionID,
+                                          @NonNull final String sReferencedSbdhInstanceID,
+                                          @NonNull final String sAttemptedMlsToParticipantID,
+                                          @NonNull final String sFallbackDefaultSpidParticipantID)
+  {
+    final TelemetryAttributes aAttrs = TelemetryAttributes.builder ()
+                                                          .put (CPhossAPOtel.ATTR_TRANSACTION_ID,
+                                                                sOutboundTransactionID)
+                                                          .put (CPhossAPOtel.ATTR_SBDH_INSTANCE_ID,
+                                                                sReferencedSbdhInstanceID)
+                                                          .build ();
+    APMetrics.OUTBOUND_MLS_SPECIAL_TO_NOT_REACHABLE.add (1, aAttrs);
+  }
+
   public void onInboundForwardingError (@NonNull final String sTransactionID, final boolean bIsRetry)
   {
     final TelemetryAttributes aAttrs = TelemetryAttributes.builder ()

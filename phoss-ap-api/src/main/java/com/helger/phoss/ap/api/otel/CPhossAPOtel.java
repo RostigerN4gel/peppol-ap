@@ -47,6 +47,8 @@ public final class CPhossAPOtel
   /** @since 0.10.0 */
   public static final String METRIC_INBOUND_DUPLICATE_REJECTIONS = "phoss.ap.inbound.duplicate.rejections";
   public static final String METRIC_INBOUND_MLS_CORRELATION_ERRORS = "phoss.ap.inbound.mls.correlation_errors";
+  /** @since 0.11.0 */
+  public static final String METRIC_OUTBOUND_MLS_SPECIAL_TO_NOT_REACHABLE = "phoss.ap.outbound.mls.special_to_not_reachable";
   public static final String METRIC_INBOUND_FORWARDING_ERRORS = "phoss.ap.inbound.forwarding.errors";
   public static final String METRIC_INBOUND_FORWARDING_PERMANENT_FAILURES = "phoss.ap.inbound.forwarding.permanent_failures";
   public static final String METRIC_OUTBOUND_SENDING_PERMANENT_FAILURES = "phoss.ap.outbound.sending.permanent_failures";

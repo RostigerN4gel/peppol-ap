@@ -50,6 +50,7 @@ import com.helger.peppolid.IDocumentTypeIdentifier;
 import com.helger.peppolid.IParticipantIdentifier;
 import com.helger.peppolid.IProcessIdentifier;
 import com.helger.peppolid.factory.IIdentifierFactory;
+import com.helger.peppolid.peppol.spis.SPIDHelper;
 import com.helger.phase4.crypto.AS4CryptoFactoryConfiguration;
 import com.helger.phase4.dynamicdiscovery.AS4EndpointDetailProviderConstant;
 import com.helger.phase4.dynamicdiscovery.AS4EndpointDetailProviderPeppol;
@@ -102,6 +103,99 @@ import com.helger.telemetry.Telemetry;
  */
 public final class OutboundOrchestrator
 {
+  /**
+   * Classification of an SMP lookup outcome, used to decide the follow-up action (MLS fallback,
+   * retry or permanent failure).
+   */
+  private enum ESmpLookupState
+  {
+    /** SMP lookup succeeded, endpoint details are available. */
+    SUCCESS,
+    /** The receiver participant or the requested service is not registered (not retry feasible). */
+    NOT_REGISTERED,
+    /** A transient error occurred, the same receiver should be retried later. */
+    RETRY
+  }
+
+  /**
+   * Immutable result of a single SMP lookup attempt performed by {@link #_performSmpLookup}.
+   */
+  private static final class SmpLookupResult
+  {
+    private final ESmpLookupState m_eState;
+    private final X509Certificate m_aReceiverCert;
+    private final String m_sReceiverAPURL;
+    private final String m_sReceiverTechnicalContact;
+    private final String m_sErrorMessage;
+
+    private SmpLookupResult (@NonNull final ESmpLookupState eState,
+                             @Nullable final X509Certificate aReceiverCert,
+                             @Nullable final String sReceiverAPURL,
+                             @Nullable final String sReceiverTechnicalContact,
+                             @Nullable final String sErrorMessage)
+    {
+      m_eState = eState;
+      m_aReceiverCert = aReceiverCert;
+      m_sReceiverAPURL = sReceiverAPURL;
+      m_sReceiverTechnicalContact = sReceiverTechnicalContact;
+      m_sErrorMessage = sErrorMessage;
+    }
+
+    @NonNull
+    ESmpLookupState getState ()
+    {
+      return m_eState;
+    }
+
+    @Nullable
+    X509Certificate getReceiverCert ()
+    {
+      return m_aReceiverCert;
+    }
+
+    @Nullable
+    String getReceiverAPURL ()
+    {
+      return m_sReceiverAPURL;
+    }
+
+    @Nullable
+    String getReceiverTechnicalContact ()
+    {
+      return m_sReceiverTechnicalContact;
+    }
+
+    @Nullable
+    String getErrorMessage ()
+    {
+      return m_sErrorMessage;
+    }
+
+    @NonNull
+    static SmpLookupResult success (@Nullable final X509Certificate aReceiverCert,
+                                    @Nullable final String sReceiverAPURL,
+                                    @Nullable final String sReceiverTechnicalContact)
+    {
+      return new SmpLookupResult (ESmpLookupState.SUCCESS,
+                                  aReceiverCert,
+                                  sReceiverAPURL,
+                                  sReceiverTechnicalContact,
+                                  null);
+    }
+
+    @NonNull
+    static SmpLookupResult notRegistered (@NonNull final String sErrorMessage)
+    {
+      return new SmpLookupResult (ESmpLookupState.NOT_REGISTERED, null, null, null, sErrorMessage);
+    }
+
+    @NonNull
+    static SmpLookupResult retry (@NonNull final String sErrorMessage)
+    {
+      return new SmpLookupResult (ESmpLookupState.RETRY, null, null, null, sErrorMessage);
+    }
+  }
+
   private static final Logger LOGGER = LoggerFactory.getLogger (OutboundOrchestrator.class);
 
   /** Private constructor to prevent instantiation of this utility class. */
@@ -439,6 +533,164 @@ public final class OutboundOrchestrator
   }
 
   /**
+   * Derive the default SPID MLS receiver from a given MLS receiver participant identifier. Since a
+   * valid custom <code>MLS_TO</code> always shares the receiving C2's SPID Main ID (MLS SPOG
+   * section 5.1), the default SPID receiver is <code>0242:&lt;Main ID&gt;</code>.
+   *
+   * @param aReceiverID
+   *        The MLS receiver participant identifier. May not be <code>null</code>.
+   * @param aIF
+   *        The identifier factory. May not be <code>null</code>.
+   * @return The derived default SPID receiver participant identifier, or <code>null</code> if the
+   *         receiver does not use the SPIS scheme or has no valid Main ID.
+   */
+  @Nullable
+  private static IParticipantIdentifier _deriveDefaultSpidReceiver (@NonNull final IParticipantIdentifier aReceiverID,
+                                                                    @NonNull final IIdentifierFactory aIF)
+  {
+    final String sValue = aReceiverID.getValue ();
+    final String sPrefix = SPIDHelper.SPIS_PARTICIPANT_ID_SCHEME + ":";
+    if (sValue == null || !sValue.startsWith (sPrefix) || sValue.length () < sPrefix.length () + 6)
+      return null;
+
+    final String sMainID = sValue.substring (sPrefix.length (), sPrefix.length () + 6);
+    return aIF.createParticipantIdentifierWithDefaultScheme (sPrefix + sMainID);
+  }
+
+  /**
+   * Perform a single SMP lookup (NAPTR resolution plus service metadata lookup) for the provided
+   * receiver. All lookup related fields of the sending report are updated as a side effect. This
+   * method does not update the transaction status or notify handlers - the caller decides the
+   * follow-up action based on the returned {@link SmpLookupResult}.
+   *
+   * @param sRealLogPrefix
+   *        Log message prefix. May not be <code>null</code>.
+   * @param aReceiverID
+   *        The receiver participant identifier to look up. May not be <code>null</code>.
+   * @param aDocTypeID
+   *        The document type identifier. May not be <code>null</code>.
+   * @param aProcessID
+   *        The process identifier. May not be <code>null</code>.
+   * @param aSMLInfo
+   *        The SML info for NAPTR resolution. May not be <code>null</code>.
+   * @param aSendingReport
+   *        The sending report to update with lookup results. May not be <code>null</code>.
+   * @return The classified lookup result. Never <code>null</code>.
+   */
+  @NonNull
+  private static SmpLookupResult _performSmpLookup (@NonNull final String sRealLogPrefix,
+                                                    @NonNull final IParticipantIdentifier aReceiverID,
+                                                    @NonNull final IDocumentTypeIdentifier aDocTypeID,
+                                                    @NonNull final IProcessIdentifier aProcessID,
+                                                    @NonNull final ISMLInfo aSMLInfo,
+                                                    @NonNull final Phase4PeppolSendingReport aSendingReport)
+  {
+    boolean bSmpLookupSuccess = false;
+    try (final ITelemetrySpan aSmpSpan = Telemetry.startSpan (CPhossAPOtel.SPAN_SMP_LOOKUP, ETelemetrySpanKind.CLIENT)
+                                                  .setAttribute (CPhossAPOtel.ATTR_RECEIVER_ID,
+                                                                 aReceiverID.getURIEncoded ()))
+    {
+      // Nested try is needed
+      try
+      {
+        // SMP lookup to find endpoint URL
+        // Try to resolve SMP host - performs NAPTR lookup
+        final StopWatch aLookupSW = StopWatch.createdStarted ();
+        final SMPClientReadOnly aSMPClient;
+        try
+        {
+          aSMPClient = new CachingSMPClientReadOnly (PeppolNaptrURLProvider.INSTANCE, aReceiverID, aSMLInfo);
+          APBasicConfig.applyHttpProxySettings (aSMPClient.httpClientSettings ());
+
+          // Remember the host URL from NAPTR lookup
+          aSendingReport.setC3SMPURL (aSMPClient.getSMPHostURI ());
+          aSmpSpan.setAttribute (CPhossAPOtel.ATTR_SMP_URL, aSMPClient.getSMPHostURI ());
+        }
+        catch (final SMPDNSResolutionException ex)
+        {
+          final String sMsg = "The participant ID '" +
+                              aReceiverID.getURIEncoded () +
+                              "' is not registered in the Peppol Network";
+          aSendingReport.setLookupError (sMsg);
+          aSendingReport.setLookupException (ex);
+
+          // Remember duration
+          aLookupSW.stop ();
+          aSendingReport.setLookupDurationMillis (aLookupSW.getMillis ());
+
+          return SmpLookupResult.notRegistered (sMsg + ". Technical details: " + ex.getMessage ());
+        }
+
+        // Perform SMP lookup
+        final String sCircuitBreakerKeySMP = "smp$" + aSMPClient.getSMPHostURI ();
+        if (!CircuitBreakerManager.tryAcquirePermit (sCircuitBreakerKeySMP))
+        {
+          aLookupSW.stop ();
+          aSendingReport.setLookupError ("SMP access limited by Circuit Breaker");
+          aSendingReport.setLookupDurationMillis (aLookupSW.getMillis ());
+
+          return SmpLookupResult.retry ("SMP access limited by Circuit Breaker '" + sCircuitBreakerKeySMP + "'");
+        }
+
+        final AS4EndpointDetailProviderPeppol aEndpointDetails = AS4EndpointDetailProviderPeppol.create (aSMPClient);
+        try
+        {
+          // Throws an exception in case of error
+          aEndpointDetails.init (aDocTypeID, aProcessID, aReceiverID);
+          aLookupSW.stop ();
+          final X509Certificate aReceiverCert = aEndpointDetails.getReceiverAPCertificate ();
+          final String sReceiverAPURL = aEndpointDetails.getReceiverAPEndpointURL ();
+          final String sReceiverTechnicalContact = aEndpointDetails.getReceiverTechnicalContact ();
+
+          // Updated sending report
+          aSendingReport.setC3Cert (aReceiverCert);
+          aSendingReport.setC3EndpointURL (sReceiverAPURL);
+          aSendingReport.setC3TechnicalContact (sReceiverTechnicalContact);
+          aSendingReport.setLookupDurationMillis (aLookupSW.getMillis ());
+
+          CircuitBreakerManager.recordSuccess (sCircuitBreakerKeySMP);
+
+          bSmpLookupSuccess = true;
+          return SmpLookupResult.success (aReceiverCert, sReceiverAPURL, sReceiverTechnicalContact);
+        }
+        catch (final Phase4Exception ex)
+        {
+          CircuitBreakerManager.recordFailure (sCircuitBreakerKeySMP);
+
+          aLookupSW.stop ();
+          if (ex instanceof Phase4SMPException)
+          {
+            aSendingReport.setLookupError (ex.getMessage ());
+            aSendingReport.setLookupException ((Exception) ex.getCause ());
+          }
+          else
+          {
+            aSendingReport.setLookupError ("Error fetching Service Details from SMP");
+            aSendingReport.setLookupException (ex);
+          }
+          aSendingReport.setLookupDurationMillis (aLookupSW.getMillis ());
+
+          if (ex.isRetryFeasible ())
+            return SmpLookupResult.retry (ex.getMessage ());
+          return SmpLookupResult.notRegistered (ex.getMessage ());
+        }
+      }
+      catch (final RuntimeException ex)
+      {
+        aSmpSpan.recordException (ex);
+        throw ex;
+      }
+      finally
+      {
+        if (bSmpLookupSuccess)
+          aSmpSpan.setStatusOk ();
+        else
+          aSmpSpan.setStatusError (null);
+      }
+    }
+  }
+
+  /**
    * Process a pending outbound transaction by performing SMP lookup and sending the document via
    * AS4/Peppol. This method handles dynamic discovery (NAPTR + SMP), certificate validation,
    * circuit breaker checks, and the actual AS4 transmission. On success, the transaction status is
@@ -458,6 +710,35 @@ public final class OutboundOrchestrator
   @NonNull
   public static Phase4PeppolSendingReport processPendingOutbound (@NonNull final String sLogPrefix,
                                                                   @NonNull final IOutboundTransaction aTx)
+  {
+    return processPendingOutbound (sLogPrefix, aTx, null);
+  }
+
+  /**
+   * Process a pending outbound transaction by performing SMP lookup and sending the document via
+   * AS4/Peppol. See {@link #processPendingOutbound(String, IOutboundTransaction)} for the general
+   * behaviour. This variant additionally supports the MLS specific SMP lookup fallback (MLS SPOG
+   * section 5.4): if the primary MLS receiver cannot be resolved via SMP, registered handlers are
+   * notified and the lookup is retried against the default SPID receiver. If even the default SPID
+   * receiver is not resolvable, the transaction is queued and retried (PNP Rule MLS-4) instead of
+   * being marked as permanently failed.
+   *
+   * @param sLogPrefix
+   *        Log message prefix for traceability. May not be <code>null</code>.
+   * @param aTx
+   *        The outbound transaction to process. Must be in pending state. May not be
+   *        <code>null</code>.
+   * @param aMlsFallback
+   *        The optional MLS SMP lookup fallback description. If <code>null</code>, no MLS specific
+   *        fallback handling is performed (regular document sending). May be <code>null</code>.
+   * @return The {@link Phase4PeppolSendingReport} containing the full details of the sending
+   *         attempt. Never <code>null</code>.
+   * @since 0.11.0
+   */
+  @NonNull
+  public static Phase4PeppolSendingReport processPendingOutbound (@NonNull final String sLogPrefix,
+                                                                  @NonNull final IOutboundTransaction aTx,
+                                                                  @Nullable final MlsSmpFallback aMlsFallback)
   {
     final IAPTimestampManager aTimestampMgr = APBasicMetaManager.getTimestampMgr ();
     final IIdentifierFactory aIF = APBasicMetaManager.getIdentifierFactory ();
@@ -548,6 +829,33 @@ public final class OutboundOrchestrator
                                            "'");
         aSendingReport.setReceiverID (aReceiverID);
 
+        // The effective receiver may switch to the default SPID if an MLS fallback applies (see
+        // MLS SPOG section 5.4)
+        IParticipantIdentifier aEffectiveReceiverID = aReceiverID;
+
+        // Determine the effective MLS fallback. For MLS responses that are retried via the two-arg
+        // overload (e.g. by the RetryScheduler) no explicit fallback is passed, so it is
+        // reconstructed here: the default SPID always shares the MLS receiver's Main ID (MLS SPOG
+        // section 5.1), so it can be derived from the receiver itself.
+        MlsSmpFallback aEffectiveMlsFallback = aMlsFallback;
+        if (aEffectiveMlsFallback == null && aTx.getTransactionType () == ETransactionType.MLS_RESPONSE)
+        {
+          final IParticipantIdentifier aDefaultSpid = _deriveDefaultSpidReceiver (aReceiverID, aIF);
+          if (aDefaultSpid != null)
+          {
+            // Best-effort: resolve the referenced business document SBDH for notification purposes
+            String sRefSbdhInstanceID = aTx.getSbdhInstanceID ();
+            final String sInboundTxID = aTx.getMlsInboundTransactionID ();
+            if (StringHelper.isNotEmpty (sInboundTxID))
+            {
+              final var aInboundTx = APJdbcMetaManager.getInboundTransactionMgr ().getByID (sInboundTxID);
+              if (aInboundTx != null)
+                sRefSbdhInstanceID = aInboundTx.getSbdhInstanceID ();
+            }
+            aEffectiveMlsFallback = new MlsSmpFallback (aDefaultSpid, sRefSbdhInstanceID);
+          }
+        }
+
         final IDocumentTypeIdentifier aDocTypeID = aIF.parseDocumentTypeIdentifier (aTx.getDocTypeID ());
         if (aDocTypeID == null)
           throw new IllegalStateException ("Failed to parse document type identifier '" + aTx.getDocTypeID () + "'");
@@ -609,114 +917,73 @@ public final class OutboundOrchestrator
         }
         else
         {
-          // Perform SMP lookup
-          boolean bSmpLookupSuccess = false;
-          try (final ITelemetrySpan aSmpSpan = Telemetry.startSpan (CPhossAPOtel.SPAN_SMP_LOOKUP,
-                                                                    ETelemetrySpanKind.CLIENT)
-                                                        .setAttribute (CPhossAPOtel.ATTR_RECEIVER_ID,
-                                                                       aTx.getReceiverID ()))
+          // Perform SMP lookup for the primary (effective) receiver
+          SmpLookupResult aLookupResult = _performSmpLookup (sRealLogPrefix,
+                                                             aEffectiveReceiverID,
+                                                             aDocTypeID,
+                                                             aProcessID,
+                                                             aSMLInfo,
+                                                             aSendingReport);
+
+          // MLS SPOG section 5.4: if the custom MLS_TO receiver is not reachable, notify and fall
+          // back to the default SPID receiver
+          if (aLookupResult.getState () == ESmpLookupState.NOT_REGISTERED &&
+              aEffectiveMlsFallback != null &&
+              !aEffectiveReceiverID.getURIEncoded ()
+                                   .equals (aEffectiveMlsFallback.getFallbackReceiverID ().getURIEncoded ()))
           {
-            try
-            {
-              // SMP lookup to find endpoint URL
-              // Try to resolve SMP host - performs NAPTR lookup
-              final StopWatch aLookupSW = StopWatch.createdStarted ();
-              final SMPClientReadOnly aSMPClient;
-              try
-              {
-                aSMPClient = new CachingSMPClientReadOnly (PeppolNaptrURLProvider.INSTANCE, aReceiverID, aSMLInfo);
-                APBasicConfig.applyHttpProxySettings (aSMPClient.httpClientSettings ());
+            LOGGER.warn (sRealLogPrefix +
+                         "The custom MLS receiver '" +
+                         aEffectiveReceiverID.getURIEncoded () +
+                         "' is not reachable via SMP - falling back to the default SPID receiver '" +
+                         aEffectiveMlsFallback.getFallbackReceiverID ().getURIEncoded () +
+                         "'");
 
-                // Remember the host URL from NAPTR lookup
-                aSendingReport.setC3SMPURL (aSMPClient.getSMPHostURI ());
-                aSmpSpan.setAttribute (CPhossAPOtel.ATTR_SMP_URL, String.valueOf (aSMPClient.getSMPHostURI ()));
-              }
-              catch (final SMPDNSResolutionException ex)
-              {
-                final String sMsg = "The participant ID '" +
-                                    aTx.getReceiverID () +
-                                    "' is not registered in the Peppol Network";
-                aSendingReport.setLookupError (sMsg);
-                aSendingReport.setLookupException (ex);
+            // Notify registered handlers about the special MLS_TO fallback
+            for (final var aHandler : APCoreMetaManager.getAllNotificationHandlers ())
+              aHandler.onSpecialMlsToNotReachable (sTxID,
+                                                   aEffectiveMlsFallback.getReferencedSbdhInstanceID (),
+                                                   aEffectiveReceiverID.getURIEncoded (),
+                                                   aEffectiveMlsFallback.getFallbackReceiverID ().getURIEncoded ());
 
-                // Remember duration
-                aLookupSW.stop ();
-                aSendingReport.setLookupDurationMillis (aLookupSW.getMillis ());
-
-                onPermanentFailure.accept (sMsg + ". Technical details: " + ex.getMessage ());
-
-                return aSendingReport;
-              }
-
-              // Perform SMP lookup
-              final String sCircuitBreakerKeySMP = "smp$" + aSMPClient.getSMPHostURI ();
-              if (!CircuitBreakerManager.tryAcquirePermit (sCircuitBreakerKeySMP))
-              {
-                aLookupSW.stop ();
-                aSendingReport.setLookupError ("SMP access limited by Circuit Breaker");
-                aSendingReport.setLookupDurationMillis (aLookupSW.getMillis ());
-
-                onFailed.accept ("SMP access limited by Circuit Breaker '" + sCircuitBreakerKeySMP + "'");
-                return aSendingReport;
-              }
-
-              final AS4EndpointDetailProviderPeppol aEndpointDetails = AS4EndpointDetailProviderPeppol.create (aSMPClient);
-              try
-              {
-                // Throws an exception in case of error
-                aEndpointDetails.init (aDocTypeID, aProcessID, aReceiverID);
-                aLookupSW.stop ();
-                aReceiverCertOut = aEndpointDetails.getReceiverAPCertificate ();
-                sReceiverAPURLOut = aEndpointDetails.getReceiverAPEndpointURL ();
-                sReceiverTechnicalContactOut = aEndpointDetails.getReceiverTechnicalContact ();
-
-                // Updated sending report
-                aSendingReport.setC3Cert (aReceiverCertOut);
-                aSendingReport.setC3EndpointURL (sReceiverAPURLOut);
-                aSendingReport.setC3TechnicalContact (sReceiverTechnicalContactOut);
-                aSendingReport.setLookupDurationMillis (aLookupSW.getMillis ());
-
-                CircuitBreakerManager.recordSuccess (sCircuitBreakerKeySMP);
-              }
-              catch (final Phase4Exception ex)
-              {
-                CircuitBreakerManager.recordFailure (sCircuitBreakerKeySMP);
-
-                aLookupSW.stop ();
-                if (ex instanceof Phase4SMPException)
-                {
-                  aSendingReport.setLookupError (ex.getMessage ());
-                  aSendingReport.setLookupException ((Exception) ex.getCause ());
-                }
-                else
-                {
-                  aSendingReport.setLookupError ("Error fetching Service Details from SMP");
-                  aSendingReport.setLookupException (ex);
-                }
-                aSendingReport.setLookupDurationMillis (aLookupSW.getMillis ());
-
-                if (ex.isRetryFeasible ())
-                  onFailed.accept (ex.getMessage ());
-                else
-                  onPermanentFailure.accept (ex.getMessage ());
-                return aSendingReport;
-              }
-
-              bSmpLookupSuccess = true;
-            }
-            catch (final RuntimeException ex)
-            {
-              aSmpSpan.recordException (ex);
-              throw ex;
-            }
-            finally
-            {
-              if (bSmpLookupSuccess)
-                aSmpSpan.setStatusOk ();
-              else
-                aSmpSpan.setStatusError (null);
-            }
+            // Retry the lookup against the default SPID receiver
+            aEffectiveReceiverID = aEffectiveMlsFallback.getFallbackReceiverID ();
+            aSendingReport.setReceiverID (aEffectiveReceiverID);
+            aLookupResult = _performSmpLookup (sRealLogPrefix,
+                                               aEffectiveReceiverID,
+                                               aDocTypeID,
+                                               aProcessID,
+                                               aSMLInfo,
+                                               aSendingReport);
           }
+
+          if (aLookupResult.getState () != ESmpLookupState.SUCCESS)
+          {
+            final String sErrMsg = aLookupResult.getErrorMessage ();
+            if (aLookupResult.getState () == ESmpLookupState.RETRY)
+            {
+              // Transient error - queue and retry the same receiver
+              onFailed.accept (sErrMsg);
+            }
+            else
+              if (aEffectiveMlsFallback != null)
+              {
+                // MLS SPOG section 5.4: the (default SPID) MLS receiver is not reachable - queue
+                // and retry per PNP Rule MLS-4 instead of failing permanently
+                onFailed.accept (sErrMsg);
+              }
+              else
+              {
+                // Regular document: the participant or service is not registered - permanent
+                // failure
+                onPermanentFailure.accept (sErrMsg);
+              }
+            return aSendingReport;
+          }
+
+          aReceiverCertOut = aLookupResult.getReceiverCert ();
+          sReceiverAPURLOut = aLookupResult.getReceiverAPURL ();
+          sReceiverTechnicalContactOut = aLookupResult.getReceiverTechnicalContact ();
         }
 
         // Final aliases — the SMP scope hoisted these as nullable locals so they remain visible
@@ -766,7 +1033,7 @@ public final class OutboundOrchestrator
                                              .sendingDateTime (aAS4Timestamp)
                                              // Peppol IDs
                                              .senderParticipantID (aSenderID)
-                                             .receiverParticipantID (aReceiverID)
+                                             .receiverParticipantID (aEffectiveReceiverID)
                                              .documentTypeID (aDocTypeID)
                                              .processID (aProcessID)
                                              .countryC1 (aTx.getC1CountryCode ())

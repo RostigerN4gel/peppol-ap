@@ -56,6 +56,7 @@ import com.helger.phoss.ap.basic.APBasicMetaManager;
 import com.helger.phoss.ap.core.APCoreConfig;
 import com.helger.phoss.ap.core.APCoreMetaManager;
 import com.helger.phoss.ap.core.helper.HashHelper;
+import com.helger.phoss.ap.core.outbound.MlsSmpFallback;
 import com.helger.phoss.ap.core.outbound.OutboundOrchestrator;
 import com.helger.phoss.ap.db.APJdbcMetaManager;
 
@@ -139,6 +140,21 @@ public final class MlsHandler
         return ESuccess.FAILURE;
       }
 
+      // The default SPID receiver is always derived from the sending C2's Seat ID (drop the 3-char
+      // prefix). It is the fallback target if a custom MLS_TO is not reachable (MLS SPOG 5.4).
+      final String sDefaultSpidValue = SPIDHelper.SPIS_PARTICIPANT_ID_SCHEME +
+                                       ":" +
+                                       aInboundTx.getC2SeatID ().substring (3);
+      final IParticipantIdentifier aDefaultSpidReceiverPID = aIF.createParticipantIdentifierWithDefaultScheme (sDefaultSpidValue);
+      if (aDefaultSpidReceiverPID == null)
+      {
+        // Failed to build PID
+        LOGGER.error ("Failed to create default SPID MLS receiver participant ID with value '" +
+                      sDefaultSpidValue +
+                      "'");
+        return ESuccess.FAILURE;
+      }
+
       // If an MlsTo value is in the DB, it is previously checked and valid
       final IParticipantIdentifier aMLSReceiverPID;
       if (StringHelper.isNotEmpty (aInboundTx.getMlsTo ()))
@@ -154,14 +170,7 @@ public final class MlsHandler
       }
       else
       {
-        final String sValue = SPIDHelper.SPIS_PARTICIPANT_ID_SCHEME + ":" + aInboundTx.getC2SeatID ().substring (3);
-        aMLSReceiverPID = aIF.createParticipantIdentifierWithDefaultScheme (sValue);
-        if (aMLSReceiverPID == null)
-        {
-          // Failed to build PID
-          LOGGER.error ("Failed to create MLS receiver participant ID with value '" + sValue + "'");
-          return ESuccess.FAILURE;
-        }
+        aMLSReceiverPID = aDefaultSpidReceiverPID;
       }
 
       final PeppolMLSBuilder aBuilder = aOutcome.getAsMLSBuilder ();
@@ -251,9 +260,13 @@ public final class MlsHandler
       if (aInboundMgr.updateMlsFields (aInboundTx.getID (), eResponseCode, sMlsTxID).isFailure ())
         LOGGER.error ("Failed to update MLS fields for inbound transaction '" + aInboundTx.getID () + "'");
 
-      // Perform actual sending
+      // Perform actual sending. Provide the default SPID as MLS fallback target in case the custom
+      // MLS_TO receiver is not reachable via SMP (MLS SPOG section 5.4).
+      final MlsSmpFallback aMlsFallback = new MlsSmpFallback (aDefaultSpidReceiverPID,
+                                                             aInboundTx.getSbdhInstanceID ());
       final Phase4PeppolSendingReport aSendingReport = OutboundOrchestrator.processPendingOutbound ("[SubmitMLS] ",
-                                                                                                    aMlsTx);
+                                                                                                    aMlsTx,
+                                                                                                    aMlsFallback);
       return ESuccess.valueOf (aSendingReport.isOverallSuccess ());
     }
   }

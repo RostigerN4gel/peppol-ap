@@ -141,6 +141,23 @@ public final class DemoNotificationHandlerSPI implements IAPNotificationHandlerS
   }
 
   /** {@inheritDoc} */
+  public void onSpecialMlsToNotReachable (@NonNull final String sOutboundTransactionID,
+                                          @NonNull final String sReferencedSbdhInstanceID,
+                                          @NonNull final String sAttemptedMlsToParticipantID,
+                                          @NonNull final String sFallbackDefaultSpidParticipantID)
+  {
+    LOGGER.info (PREFIX +
+                 "onSpecialMlsToNotReachable: outboundTransactionID=" +
+                 sOutboundTransactionID +
+                 ", referencedSbdhInstanceID=" +
+                 sReferencedSbdhInstanceID +
+                 ", attemptedMlsToParticipantID=" +
+                 sAttemptedMlsToParticipantID +
+                 ", fallbackDefaultSpidParticipantID=" +
+                 sFallbackDefaultSpidParticipantID);
+  }
+
+  /** {@inheritDoc} */
   public void onInboundForwardingError (@NonNull final String sTransactionID, final boolean bIsRetry)
   {
     LOGGER.info (PREFIX + "onInboundForwardingError: transactionID=" + sTransactionID + ", isRetry=" + bIsRetry);
