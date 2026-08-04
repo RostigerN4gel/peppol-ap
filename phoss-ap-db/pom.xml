@@ -22,7 +22,7 @@
   <parent>
     <groupId>com.helger.phoss.ap</groupId>
     <artifactId>phoss-ap-parent-pom</artifactId>
-    <version>0.10.4-SNAPSHOT</version>
+    <version>0.11.0-SNAPSHOT</version>
   </parent>
   <artifactId>phoss-ap-db</artifactId>
   <packaging>jar</packaging>
@@ -87,6 +87,9 @@
       <artifactId>mysql-connector-j</artifactId>
       <scope>runtime</scope>
     </dependency>
+    <!-- DB2 support is driver-agnostic at build time: the IBM jcc driver and the
+         flyway-database-db2 dialect are supplied at runtime via the /ext extension directory,
+         so they are intentionally not declared as dependencies here. -->
 
     <dependency>
       <groupId>org.slf4j</groupId>

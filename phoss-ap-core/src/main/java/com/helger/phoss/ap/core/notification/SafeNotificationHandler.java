@@ -146,6 +146,25 @@ public final class SafeNotificationHandler implements IAPNotificationHandlerSPI
   }
 
   /** {@inheritDoc} */
+  public void onSpecialMlsToNotReachable (@NonNull final String sOutboundTransactionID,
+                                          @NonNull final String sReferencedSbdhInstanceID,
+                                          @NonNull final String sAttemptedMlsToParticipantID,
+                                          @NonNull final String sFallbackDefaultSpidParticipantID)
+  {
+    try
+    {
+      m_aHdl.onSpecialMlsToNotReachable (sOutboundTransactionID,
+                                         sReferencedSbdhInstanceID,
+                                         sAttemptedMlsToParticipantID,
+                                         sFallbackDefaultSpidParticipantID);
+    }
+    catch (final Exception ex)
+    {
+      LOGGER.error ("Internal error invoking onSpecialMlsToNotReachable on " + m_aHdl, ex);
+    }
+  }
+
+  /** {@inheritDoc} */
   public void onInboundForwardingError (@NonNull final String sTransactionID, final boolean bIsRetry)
   {
     try

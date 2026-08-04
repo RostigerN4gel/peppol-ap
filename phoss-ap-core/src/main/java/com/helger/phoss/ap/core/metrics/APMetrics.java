@@ -98,6 +98,9 @@ public final class APMetrics
   public static final ITelemetryCounter OUTBOUND_SENDING_PERMANENT_FAILURES = TelemetryMetrics.counter (CPhossAPOtel.METRIC_OUTBOUND_SENDING_PERMANENT_FAILURES,
                                                                                                        "Outbound transactions that exhausted all sending retries",
                                                                                                        "{transaction}");
+  public static final ITelemetryCounter OUTBOUND_MLS_SPECIAL_TO_NOT_REACHABLE = TelemetryMetrics.counter (CPhossAPOtel.METRIC_OUTBOUND_MLS_SPECIAL_TO_NOT_REACHABLE,
+                                                                                                         "Outbound MLS messages whose custom MLS_TO receiver was not reachable, triggering fallback to the default SPID",
+                                                                                                         "{message}");
 
   // === Reporting ===
 

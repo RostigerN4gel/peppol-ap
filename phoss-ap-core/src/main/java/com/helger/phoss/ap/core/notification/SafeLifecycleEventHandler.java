@@ -17,6 +17,7 @@
 package com.helger.phoss.ap.core.notification;
 
 import java.time.Duration;
+import java.time.OffsetDateTime;
 import java.time.YearMonth;
 
 import org.jspecify.annotations.NonNull;
@@ -28,6 +29,7 @@ import com.helger.annotation.Nonnegative;
 import com.helger.base.enforce.ValueEnforcer;
 import com.helger.base.tostring.ToStringGenerator;
 import com.helger.peppol.mls.EPeppolMLSResponseCode;
+import com.helger.phoss.ap.api.codelist.EMlsReceptionStatus;
 import com.helger.phoss.ap.api.spi.IAPLifecycleEventSPI;
 
 /**
@@ -113,12 +115,23 @@ public final class SafeLifecycleEventHandler implements IAPLifecycleEventSPI
   /** {@inheritDoc} */
   public void onInboundMLSCorrelated (@NonNull final String sMlsTransactionID,
                                       @NonNull final String sReferencedSbdhInstanceID,
+                                      @NonNull final String sCorrelatedOutboundTransactionID,
                                       @NonNull final EPeppolMLSResponseCode eMlsResponseCode,
+                                      @NonNull final EMlsReceptionStatus eMlsReceptionStatus,
+                                      @Nullable final String sMlsDocumentID,
+                                      @NonNull final OffsetDateTime aMlsReceivedDT,
                                       @Nullable final Duration aRoundTrip)
   {
     try
     {
-      m_aHdl.onInboundMLSCorrelated (sMlsTransactionID, sReferencedSbdhInstanceID, eMlsResponseCode, aRoundTrip);
+      m_aHdl.onInboundMLSCorrelated (sMlsTransactionID,
+                                     sReferencedSbdhInstanceID,
+                                     sCorrelatedOutboundTransactionID,
+                                     eMlsResponseCode,
+                                     eMlsReceptionStatus,
+                                     sMlsDocumentID,
+                                     aMlsReceivedDT,
+                                     aRoundTrip);
     }
     catch (final Exception ex)
     {

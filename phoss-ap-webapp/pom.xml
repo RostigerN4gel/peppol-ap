@@ -22,7 +22,7 @@
   <parent>
     <groupId>com.helger.phoss.ap</groupId>
     <artifactId>phoss-ap-parent-pom</artifactId>
-    <version>0.10.4-SNAPSHOT</version>
+    <version>0.11.0-SNAPSHOT</version>
   </parent>
   <artifactId>phoss-ap-webapp</artifactId>
   <packaging>jar</packaging>
@@ -106,13 +106,7 @@
       <artifactId>springdoc-openapi-starter-webmvc-api</artifactId>
       <version>${springdoc.version}</version>
     </dependency>
-    
-    <dependency>
-      <groupId>org.postgresql</groupId>
-      <artifactId>postgresql</artifactId>
-      <scope>runtime</scope>
-    </dependency>
- 
+
     <dependency>
       <groupId>io.sentry</groupId>
       <artifactId>sentry-logback</artifactId>
@@ -140,6 +134,12 @@
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-maven-plugin</artifactId>
         <version>${spring-boot.version}</version>
+        <configuration>
+          <!-- The ZIP layout uses PropertiesLauncher, so external jars (custom DB drivers,
+               SPI extensions) can be added to the classpath at runtime via the LOADER_PATH
+               environment variable or -Dloader.path, without rebuilding this jar. -->
+          <layout>ZIP</layout>
+        </configuration>
         <executions>
           <execution>
             <goals>
