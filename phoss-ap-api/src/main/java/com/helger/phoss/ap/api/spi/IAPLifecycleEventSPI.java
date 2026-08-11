@@ -17,6 +17,7 @@
 package com.helger.phoss.ap.api.spi;
 
 import java.time.Duration;
+import java.time.OffsetDateTime;
 import java.time.YearMonth;
 
 import org.jspecify.annotations.NonNull;
@@ -25,6 +26,7 @@ import org.jspecify.annotations.Nullable;
 import com.helger.annotation.Nonnegative;
 import com.helger.annotation.style.IsSPIInterface;
 import com.helger.peppol.mls.EPeppolMLSResponseCode;
+import com.helger.phoss.ap.api.codelist.EMlsReceptionStatus;
 
 /**
  * SPI interface for receiving notifications about positive lifecycle events of the AP — e.g.
@@ -100,8 +102,21 @@ public interface IAPLifecycleEventSPI
    *        The inbound MLS transaction ID. Never <code>null</code>.
    * @param sReferencedSbdhInstanceID
    *        The SBDH Instance Identifier of the original outbound document. Never <code>null</code>.
+   * @param sCorrelatedOutboundTransactionID
+   *        The transaction ID of the original outbound business document this MLS was correlated
+   *        with. Use this to look up the full business-level details (sender, receiver, document
+   *        type, process) of the referenced transaction. Never <code>null</code>.
    * @param eMlsResponseCode
    *        The response code carried by the MLS. Never <code>null</code>.
+   * @param eMlsReceptionStatus
+   *        The resulting reception status persisted on the outbound transaction, derived from the
+   *        response code ({@code RECEIVED_AP} / {@code RECEIVED_AB} / {@code RECEIVED_RE}). Never
+   *        <code>null</code>.
+   * @param sMlsDocumentID
+   *        The document ID (ApplicationResponse ID) of the received MLS, or <code>null</code> if it
+   *        was not available.
+   * @param aMlsReceivedDT
+   *        The AS4 reception timestamp of the MLS. Never <code>null</code>.
    * @param aRoundTrip
    *        The wall-clock duration between the original outbound send completion and the MLS
    *        reception, or <code>null</code> if either timestamp was not available. When present,
@@ -109,7 +124,11 @@ public interface IAPLifecycleEventSPI
    */
   void onInboundMLSCorrelated (@NonNull String sMlsTransactionID,
                                @NonNull String sReferencedSbdhInstanceID,
+                               @NonNull String sCorrelatedOutboundTransactionID,
                                @NonNull EPeppolMLSResponseCode eMlsResponseCode,
+                               @NonNull EMlsReceptionStatus eMlsReceptionStatus,
+                               @Nullable String sMlsDocumentID,
+                               @NonNull OffsetDateTime aMlsReceivedDT,
                                @Nullable Duration aRoundTrip);
 
   /**

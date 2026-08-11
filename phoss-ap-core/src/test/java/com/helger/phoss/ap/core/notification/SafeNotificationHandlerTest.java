@@ -49,6 +49,7 @@ public final class SafeNotificationHandlerTest
     final AtomicReference <String> m_aInboundDuplicateRejectedSenderProviderID = new AtomicReference <> ();
     final AtomicInteger m_aInboundReceiverNotServicedCount = new AtomicInteger (0);
     final AtomicInteger m_aInboundMLSCorrelationErrorCount = new AtomicInteger (0);
+    final AtomicInteger m_aSpecialMlsToNotReachableCount = new AtomicInteger (0);
     final AtomicInteger m_aInboundForwardingErrorCount = new AtomicInteger (0);
     final AtomicInteger m_aInboundPermanentForwardingFailureCount = new AtomicInteger (0);
     final AtomicInteger m_aOutboundPermanentSendingFailureCount = new AtomicInteger (0);
@@ -99,6 +100,14 @@ public final class SafeNotificationHandlerTest
                                               @NonNull final EPeppolMLSResponseCode eMlsResponseCode)
     {
       m_aInboundMLSCorrelationErrorCount.incrementAndGet ();
+    }
+
+    public void onSpecialMlsToNotReachable (@NonNull final String sOutboundTransactionID,
+                                            @NonNull final String sReferencedSbdhInstanceID,
+                                            @NonNull final String sAttemptedMlsToParticipantID,
+                                            @NonNull final String sFallbackDefaultSpidParticipantID)
+    {
+      m_aSpecialMlsToNotReachableCount.incrementAndGet ();
     }
 
     public void onInboundForwardingError (@NonNull final String sTransactionID, final boolean bIsRetry)
@@ -187,6 +196,14 @@ public final class SafeNotificationHandlerTest
       throw new IllegalStateException ("test-onInboundMLSCorrelationError");
     }
 
+    public void onSpecialMlsToNotReachable (@NonNull final String sOutboundTransactionID,
+                                            @NonNull final String sReferencedSbdhInstanceID,
+                                            @NonNull final String sAttemptedMlsToParticipantID,
+                                            @NonNull final String sFallbackDefaultSpidParticipantID)
+    {
+      throw new IllegalStateException ("test-onSpecialMlsToNotReachable");
+    }
+
     public void onInboundForwardingError (@NonNull final String sTransactionID, final boolean bIsRetry)
     {
       throw new IllegalStateException ("test-onInboundForwardingError");
@@ -255,6 +272,9 @@ public final class SafeNotificationHandlerTest
     aSafe.onInboundMLSCorrelationError ("tx-2", "ref-sbdh", EPeppolMLSResponseCode.REJECTION);
     assertEquals (1, aInner.m_aInboundMLSCorrelationErrorCount.get ());
 
+    aSafe.onSpecialMlsToNotReachable ("tx-mls", "ref-sbdh", "0242:987654-MLS", "0242:987654");
+    assertEquals (1, aInner.m_aSpecialMlsToNotReachableCount.get ());
+
     aSafe.onInboundForwardingError ("tx-3", false);
     assertEquals (1, aInner.m_aInboundForwardingErrorCount.get ());
 
@@ -294,6 +314,7 @@ public final class SafeNotificationHandlerTest
                                       "duplicate");
     aSafe.onInboundReceiverNotServiced ("sender", "receiver", "doctype", "process", "sbdh-2");
     aSafe.onInboundMLSCorrelationError ("tx-2", "ref-sbdh", EPeppolMLSResponseCode.REJECTION);
+    aSafe.onSpecialMlsToNotReachable ("tx-mls", "ref-sbdh", "0242:987654-MLS", "0242:987654");
     aSafe.onInboundForwardingError ("tx-3", true);
     aSafe.onInboundPermanentForwardingFailure ("tx-4", "sbdh-4", null);
     aSafe.onOutboundPermanentSendingFailure ("tx-5", "sbdh-5", "details");

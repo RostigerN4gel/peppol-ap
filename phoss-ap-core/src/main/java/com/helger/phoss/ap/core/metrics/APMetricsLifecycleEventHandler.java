@@ -17,6 +17,7 @@
 package com.helger.phoss.ap.core.metrics;
 
 import java.time.Duration;
+import java.time.OffsetDateTime;
 import java.time.YearMonth;
 
 import org.jspecify.annotations.NonNull;
@@ -25,6 +26,7 @@ import org.jspecify.annotations.Nullable;
 import com.helger.annotation.Nonnegative;
 import com.helger.annotation.style.IsSPIImplementation;
 import com.helger.peppol.mls.EPeppolMLSResponseCode;
+import com.helger.phoss.ap.api.codelist.EMlsReceptionStatus;
 import com.helger.phoss.ap.api.otel.CPhossAPOtel;
 import com.helger.phoss.ap.api.spi.IAPLifecycleEventSPI;
 import com.helger.telemetry.TelemetryAttributes;
@@ -81,12 +83,18 @@ public class APMetricsLifecycleEventHandler implements IAPLifecycleEventSPI
 
   public void onInboundMLSCorrelated (@NonNull final String sMlsTransactionID,
                                       @NonNull final String sReferencedSbdhInstanceID,
+                                      @NonNull final String sCorrelatedOutboundTransactionID,
                                       @NonNull final EPeppolMLSResponseCode eMlsResponseCode,
+                                      @NonNull final EMlsReceptionStatus eMlsReceptionStatus,
+                                      @Nullable final String sMlsDocumentID,
+                                      @NonNull final OffsetDateTime aMlsReceivedDT,
                                       @Nullable final Duration aRoundTrip)
   {
     final TelemetryAttributes aAttrs = TelemetryAttributes.builder ()
                                                           .put (CPhossAPOtel.ATTR_MLS_RESPONSE_CODE,
                                                                 eMlsResponseCode.getID ())
+                                                          .put (CPhossAPOtel.ATTR_MLS_RECEPTION_STATUS,
+                                                                eMlsReceptionStatus.getID ())
                                                           .build ();
     APMetrics.INBOUND_MLS_CORRELATED.add (1, aAttrs);
     if (aRoundTrip != null)

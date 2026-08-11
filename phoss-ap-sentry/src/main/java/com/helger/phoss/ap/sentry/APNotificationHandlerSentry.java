@@ -164,6 +164,23 @@ public class APNotificationHandlerSentry implements IAPNotificationHandlerSPI
   }
 
   /** {@inheritDoc} */
+  public void onSpecialMlsToNotReachable (@NonNull final String sOutboundTransactionID,
+                                          @NonNull final String sReferencedSbdhInstanceID,
+                                          @NonNull final String sAttemptedMlsToParticipantID,
+                                          @NonNull final String sFallbackDefaultSpidParticipantID)
+  {
+    _logError ("onSpecialMlsToNotReachable",
+               Map.of ("outboundTransactionID",
+                       sOutboundTransactionID,
+                       "referencedSbdhInstanceID",
+                       sReferencedSbdhInstanceID,
+                       "attemptedMlsToParticipantID",
+                       sAttemptedMlsToParticipantID,
+                       "fallbackDefaultSpidParticipantID",
+                       sFallbackDefaultSpidParticipantID));
+  }
+
+  /** {@inheritDoc} */
   public void onInboundForwardingError (@NonNull final String sTransactionID, final boolean bIsRetry)
   {
     _logError ("onInboundForwardingError",

@@ -28,6 +28,7 @@ import org.slf4j.LoggerFactory;
 
 import com.helger.annotation.concurrent.Immutable;
 import com.helger.annotation.style.ReturnsMutableCopy;
+import com.helger.annotation.style.VisibleForTesting;
 import com.helger.base.state.ESuccess;
 import com.helger.base.string.StringHelper;
 import com.helger.cache.regex.RegExHelper;
@@ -90,6 +91,49 @@ public final class InboundOrchestrator
 
   private InboundOrchestrator ()
   {}
+
+  /**
+   * Determine the valid <code>MLS_TO</code> participant identifier (URI encoded) from the provided
+   * SBDH <code>MLS_TO</code> scheme and value. Implements the MLS SPOG section 5.1 checks: the value
+   * must use the SPIS participant identifier scheme, be syntactically valid, and its Main ID must
+   * correlate to the sending C2's SPID Main ID (derived from the AP certificate Seat ID) - since
+   * redirecting an MLS to a different Service Provider is not allowed.
+   *
+   * @param sScheme
+   *        The <code>MLS_TO</code> scheme from the SBDH. May be <code>null</code>.
+   * @param sValue
+   *        The <code>MLS_TO</code> value from the SBDH. May be <code>null</code>.
+   * @param sC2SeatID
+   *        The sending C2's Seat ID (from the Peppol AP certificate CN). May be <code>null</code>.
+   * @return The URI encoded valid <code>MLS_TO</code> value, or <code>null</code> if it is absent,
+   *         syntactically invalid, or does not correlate to the sending C2.
+   */
+  @Nullable
+  @VisibleForTesting
+  static String getValidMlsTo (@Nullable final String sScheme,
+                               @Nullable final String sValue,
+                               @Nullable final String sC2SeatID)
+  {
+    // Scheme must be the ISO6523 actor id upis scheme
+    if (!PeppolIdentifierHelper.PARTICIPANT_SCHEME_ISO6523_ACTORID_UPIS.equals (sScheme))
+      return null;
+
+    // Value must be syntactically valid as an SPIS participant identifier
+    if (sValue == null ||
+        !sValue.startsWith (SPIDHelper.SPIS_PARTICIPANT_ID_SCHEME + ":") ||
+        sValue.length () <= 5 ||
+        !RegExHelper.stringMatchesPattern (SPIDHelper.REGEX_COMPLETE, sValue.substring (5)))
+      return null;
+
+    // MLS SPOG section 5.1: the MLS_TO Main ID must correlate to the sending C2's SPID Main ID
+    final String sMlsToMainID = sValue.substring (5, 5 + 6);
+    final String sC2SpidPart = sC2SeatID != null && sC2SeatID.length () >= 3 ? sC2SeatID.substring (3) : "";
+    final String sC2MainID = sC2SpidPart.length () >= 6 ? sC2SpidPart.substring (0, 6) : sC2SpidPart;
+    if (!sMlsToMainID.equalsIgnoreCase (sC2MainID))
+      return null;
+
+    return CIdentifier.getURIEncoded (sScheme, sValue);
+  }
 
   private static void _notifyInboundDuplicateRejected (@NonNull final String sSenderID,
                                                        @NonNull final String sReceiverID,
@@ -292,18 +336,7 @@ public final class InboundOrchestrator
         {
           final String sScheme = aPeppolSBD.getMLSToScheme ();
           final String sValue = aPeppolSBD.getMLSToValue ();
-          if (PeppolIdentifierHelper.PARTICIPANT_SCHEME_ISO6523_ACTORID_UPIS.equals (sScheme))
-          {
-            // Scheme is valid
-            if (sValue != null &&
-                sValue.startsWith (SPIDHelper.SPIS_PARTICIPANT_ID_SCHEME + ":") &&
-                sValue.length () > 5 &&
-                RegExHelper.stringMatchesPattern (SPIDHelper.REGEX_COMPLETE, sValue.substring (5)))
-            {
-              // Value is valid as well - use it
-              sValidMlsTo = CIdentifier.getURIEncoded (sScheme, sValue);
-            }
-          }
+          sValidMlsTo = getValidMlsTo (sScheme, sValue, sC2ID);
 
           if (sValidMlsTo == null && (sScheme != null || sValue != null))
           {
@@ -312,11 +345,11 @@ public final class InboundOrchestrator
                          sScheme +
                          "' and '" +
                          sValue +
-                         "') but they were ignored because they are invalid");
+                         "') but they were ignored because they are invalid or do not correlate to the sending C2");
           }
         }
 
-        // Store document to disk
+        // Store SBD in a persistent storage
         final String sDocumentPath = aDocPayloadMgr.storeDocument (APBasicConfig.getStorageInboundPath (),
                                                                    aAS4Timestamp,
                                                                    sSbdhInstanceID + ".sbd",
@@ -346,6 +379,7 @@ public final class InboundOrchestrator
         if (aInboundTx == null)
           throw new IllegalStateException ("Failed to store incoming transaction");
 
+        // Call callbacks
         for (final var aHandler : APCoreMetaManager.getAllLifecycleHandlers ())
           aHandler.onInboundDocumentReceived (sTxID,
                                               sSenderID,
@@ -366,6 +400,7 @@ public final class InboundOrchestrator
                                                            .setAttribute (CPhossAPOtel.ATTR_SBDH_INSTANCE_ID,
                                                                           sSbdhInstanceID))
           {
+            // Call callbacks
             for (final IInboundDocumentVerifierSPI aVerifier : APCoreMetaManager.getAllInboundVerifiers ())
             {
               final MlsOutcome aVerifierOutcome = aVerifier.verifyInboundDocument (sDocumentPath,
@@ -404,6 +439,8 @@ public final class InboundOrchestrator
         if (CPhossAP.isMLS (aDocTypeID, aProcessID))
         {
           LOGGER.info (sLogPrefix + "Handling incoming MLS message");
+
+          // Read as UBL ApplicationResponse
           final ErrorList aXSDErrors = new ErrorList ();
           final ApplicationResponseType aMLS = new PeppolMLSMarshaller ().setCollectErrors (aXSDErrors)
                                                                          .read (aPeppolSBD.getBusinessMessageNoClone ());
@@ -419,6 +456,7 @@ public final class InboundOrchestrator
             return aProcessingErrors;
           }
 
+          // Read as Peppol MLS
           final PeppolMLSBuilder aBuilder = PeppolMLSBuilder.createForApplicationResponse (aMLS);
 
           // The reference ID in the MLS is the SBDH Instance ID of the original
@@ -437,14 +475,17 @@ public final class InboundOrchestrator
             aCorrelateSpan.setAttribute (CPhossAPOtel.ATTR_TRANSACTION_ID, sTxID)
                           .setAttribute (CPhossAPOtel.ATTR_SBDH_INSTANCE_ID, sSbdhInstanceID)
                           .setAttribute (CPhossAPOtel.ATTR_MLS_RESPONSE_CODE, aBuilder.responseCode ().getID ());
-            return MlsHandler.handleIncomingMls (sLogPrefix,
-                                                 sReferencedSbdhInstanceID,
-                                                 aBuilder.responseCode (),
-                                                 aAS4Timestamp,
-                                                 aBuilder.id (),
-                                                 sTxID);
+            {
+              return MlsHandler.handleIncomingMls (sLogPrefix,
+                                                   sReferencedSbdhInstanceID,
+                                                   aBuilder.responseCode (),
+                                                   aAS4Timestamp,
+                                                   aBuilder.id (),
+                                                   sTxID);
+            }
           }).isFailure ())
           {
+            // Call callbacks
             for (final var aHandler : APCoreMetaManager.getAllNotificationHandlers ())
               aHandler.onInboundMLSCorrelationError (sTxID, sReferencedSbdhInstanceID, aBuilder.responseCode ());
           }
