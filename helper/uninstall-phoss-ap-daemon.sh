@@ -7,8 +7,9 @@
 #   2. Removes /etc/systemd/system/$SERVICE_NAME.service and reloads systemd.
 #   3. Removes the deployed jar(s) and the stable symlink from $APP_HOME.
 #
-# By default it leaves $APP_HOME and the logs intact.
-# Set PURGE=1 to also remove $APP_HOME entirely.
+# By default it leaves $APP_HOME, the logs and a service-private JDK ($JDK_DIR,
+# provisioned by the installer on hosts without a JDK 21+) intact.
+# Set REMOVE_JDK=1 to drop the private JDK, or PURGE=1 to remove $APP_HOME entirely.
 #
 # The service user/group (default: ec2-user) is never touched - this script
 # neither creates nor deletes it (it is a pre-existing shared account).
@@ -24,6 +25,9 @@ APP_HOME="${APP_HOME:-/opt/peppol-ap}"
 SERVICE_NAME="${SERVICE_NAME:-phoss-ap}"
 SERVICE_USER="${SERVICE_USER:-ec2-user}"
 PURGE="${PURGE:-0}"
+# Service-private JDK provisioned by the installer (kept unless REMOVE_JDK=1/PURGE=1)
+JDK_DIR="${JDK_DIR:-$APP_HOME/jdk}"
+REMOVE_JDK="${REMOVE_JDK:-0}"
 UNIT_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 
 # --- Require root -----------------------------------------------------------
@@ -67,6 +71,12 @@ for f in "$APP_HOME"/phoss-ap-webapp-*.jar; do
   rm -f "$f"
 done
 
+# --- Optional: the service-private JDK ---------------------------------------
+if [ "$REMOVE_JDK" = "1" ] && [ -d "$JDK_DIR" ]; then
+  echo "Removing service-private JDK $JDK_DIR"
+  rm -rf "$JDK_DIR"
+fi
+
 # --- Optional purge ----------------------------------------------------------
 # Note: the service user/group is a shared, pre-existing account and is never
 # removed, not even with PURGE=1.
@@ -83,5 +93,8 @@ if [ "$PURGE" = "1" ]; then
   echo "Service, deployed jars and $APP_HOME removed. User '$SERVICE_USER' kept (shared account)."
 else
   echo "Service and deployed jars removed. $APP_HOME and logs kept."
+  if [ "$REMOVE_JDK" != "1" ] && [ -d "$JDK_DIR" ]; then
+    echo "Service-private JDK kept at $JDK_DIR (re-run with REMOVE_JDK=1 to delete it)."
+  fi
   echo "Re-run with PURGE=1 to remove $APP_HOME as well."
 fi

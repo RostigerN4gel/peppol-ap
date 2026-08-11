@@ -33,6 +33,9 @@ JAVA_HOME=/path/to/jdk21 ./helper/build-phoss-ap.sh
 The runnable artifact is the Spring Boot fat jar **`phoss-ap-webapp/target/phoss-ap-webapp-<version>.jar`**
 (main class `com.helger.phoss.ap.webapp.PhossAPApplication`). The other modules are libraries.
 
+End-to-end setup of a Linux dev box (prerequisites, DB, keystore, config, run, systemd,
+troubleshooting): [docs/INSTALL-LINUX-DEV.md](docs/INSTALL-LINUX-DEV.md).
+
 ### Tests need infrastructure
 
 `mvn clean verify` (the full test phase) requires external services that are usually absent:
@@ -105,9 +108,12 @@ answered by a `ProcessResult` XML). See [CUSTOMIZATIONS.md](docs/CUSTOMIZATIONS.
 
 ## Repo-specific notes
 
-- `helper/` holds the build/start/stop scripts plus `install-phoss-ap-daemon.sh` /
-  `uninstall-phoss-ap-daemon.sh`, which register the jar as a **systemd** service (enabled on boot,
-  not auto-started). POSIX `sh`, target a Linux `/opt/peppol-ap` daemon running as `ec2-user`. See
+- `helper/` holds the build script, the PID-file based `start-phoss-ap.sh` / `stop-phoss-ap.sh`
+  (no systemd) plus `install-phoss-ap-daemon.sh` / `uninstall-phoss-ap-daemon.sh`, which register
+  the jar as a **systemd** service (enabled on boot, not auto-started), and
+  `start-phoss-ap-daemon.sh` / `stop-phoss-ap-daemon.sh` to drive that service. POSIX `sh`, target a
+  Linux `/opt/peppol-ap` daemon (`APP_HOME`) whose unit is named `phoss-ap` (`SERVICE_NAME`),
+  running as `ec2-user`. See
   [CUSTOMIZATIONS.md](docs/CUSTOMIZATIONS.md#deployment-helper-scripts-fork-specific).
 - `dist/` receives the exported jar from `build-phoss-ap.sh`. The jar embeds `application-dev.properties`
   secrets — do not commit `dist/`.
