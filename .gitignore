@@ -20,3 +20,4 @@ build-output.log
 /dist
 phoss-ap-webapp/src/main/resources/application-dev.properties
 phoss-ap-webapp/src/main/resources/application-prod.properties
+phoss-ap-webapp/src/main/resources/application-phossdev.properties
