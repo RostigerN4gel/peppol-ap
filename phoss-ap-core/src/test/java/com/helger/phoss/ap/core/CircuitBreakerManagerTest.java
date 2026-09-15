@@ -18,10 +18,13 @@ package com.helger.phoss.ap.core;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import java.net.SocketTimeoutException;
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 
@@ -33,6 +36,7 @@ import com.helger.config.ConfigFactory;
 import com.helger.config.fallback.ConfigWithFallback;
 import com.helger.config.fallback.IConfigWithFallback;
 import com.helger.datetime.helper.PDTFactory;
+import com.helger.phoss.ap.api.model.CircuitBreakerInfo;
 import com.helger.phoss.ap.api.config.APConfigProvider;
 import com.helger.phoss.ap.api.config.APConfigurationProperties;
 
@@ -312,6 +316,77 @@ public final class CircuitBreakerManagerTest
     // 200 characters plus the "..." marker
     final String sCause = sMsg.substring (sMsg.indexOf (sMarker) + sMarker.length ());
     assertEquals (203, sCause.length ());
+  }
+
+  @Test
+  public void testGetAllInfos ()
+  {
+    _setSystemProperty (APConfigurationProperties.CIRCUIT_BREAKER_FAILURE_THRESHOLD, "2");
+    _setSystemProperty (APConfigurationProperties.CIRCUIT_BREAKER_OPEN_DURATION, "1m");
+    APConfigProvider.setConfig (new ConfigWithFallback (ConfigFactory.createDefaultValueProvider ()));
+    CircuitBreakerManager.removeAll ();
+    assertTrue (CircuitBreakerManager.getAllInfos ().isEmpty ());
+
+    // A closed one
+    final String sOtherKey = "unittest$closed";
+    assertTrue (CircuitBreakerManager.tryAcquirePermit (sOtherKey));
+    CircuitBreakerManager.recordSuccess (sOtherKey);
+
+    // An open one
+    for (int i = 0; i < 2; ++i)
+    {
+      assertTrue (CircuitBreakerManager.tryAcquirePermit (KEY));
+      CircuitBreakerManager.recordFailure (KEY, new SocketTimeoutException ("Read timed out"));
+    }
+
+    final var aInfos = CircuitBreakerManager.getAllInfos ();
+    assertEquals (2, aInfos.size ());
+
+    // Ordered by key - "unittest$closed" before "unittest$com..."
+    final CircuitBreakerInfo aClosed = aInfos.get (0);
+    assertEquals (sOtherKey, aClosed.circuitKey ());
+    assertEquals ("CLOSED", aClosed.state ());
+    assertFalse (aClosed.isOpen ());
+    assertNull (aClosed.openSinceDT ());
+    assertEquals (Duration.ZERO, aClosed.remainingDelay ());
+    assertNull (aClosed.lastFailureCause ());
+
+    final CircuitBreakerInfo aOpen = aInfos.get (1);
+    assertEquals (KEY, aOpen.circuitKey ());
+    assertEquals ("OPEN", aOpen.state ());
+    assertTrue (aOpen.isOpen ());
+    assertNotNull (aOpen.openSinceDT ());
+    assertTrue (aOpen.remainingDelay ().toMillis () > 0);
+    assertEquals (2, aOpen.failureCount ());
+    assertEquals ("SocketTimeoutException: Read timed out", aOpen.lastFailureCause ());
+  }
+
+  @Test
+  public void testReset ()
+  {
+    _setSystemProperty (APConfigurationProperties.CIRCUIT_BREAKER_FAILURE_THRESHOLD, "2");
+    _setSystemProperty (APConfigurationProperties.CIRCUIT_BREAKER_OPEN_DURATION, "1m");
+    APConfigProvider.setConfig (new ConfigWithFallback (ConfigFactory.createDefaultValueProvider ()));
+    CircuitBreakerManager.removeAll ();
+
+    assertFalse ("An unknown key cannot be reset", CircuitBreakerManager.reset (KEY));
+
+    for (int i = 0; i < 2; ++i)
+    {
+      assertTrue (CircuitBreakerManager.tryAcquirePermit (KEY));
+      CircuitBreakerManager.recordFailure (KEY, new SocketTimeoutException ("Read timed out"));
+    }
+    assertFalse (CircuitBreakerManager.tryAcquirePermit (KEY));
+
+    assertTrue (CircuitBreakerManager.reset (KEY));
+
+    // The next call creates a new, closed circuit breaker without any history
+    assertTrue (CircuitBreakerManager.tryAcquirePermit (KEY));
+    CircuitBreakerManager.recordSuccess (KEY);
+    final var aInfos = CircuitBreakerManager.getAllInfos ();
+    assertEquals (1, aInfos.size ());
+    assertEquals ("CLOSED", aInfos.get (0).state ());
+    assertNull (aInfos.get (0).lastFailureCause ());
   }
 
   @Test

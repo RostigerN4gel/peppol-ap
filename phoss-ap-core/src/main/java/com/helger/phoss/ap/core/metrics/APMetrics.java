@@ -132,6 +132,15 @@ public final class APMetrics
                                                                                           "Unexpected exceptions raised inside the AP that are not covered by a more specific counter",
                                                                                           "{exception}");
 
+  // === Circuit breakers ===
+
+  public static final ITelemetryCounter CIRCUIT_BREAKER_REJECTIONS = TelemetryMetrics.counter (CPhossAPOtel.METRIC_CIRCUIT_BREAKER_REJECTIONS,
+                                                                                               "Calls rejected by a circuit breaker, tagged with the circuit breaker key and its state",
+                                                                                               "{call}");
+  public static final ITelemetryCounter CIRCUIT_BREAKER_STATE_CHANGES = TelemetryMetrics.counter (CPhossAPOtel.METRIC_CIRCUIT_BREAKER_STATE_CHANGES,
+                                                                                                  "Circuit breaker state transitions, tagged with the circuit breaker key and the new state",
+                                                                                                  "{transition}");
+
   private APMetrics ()
   {}
 }

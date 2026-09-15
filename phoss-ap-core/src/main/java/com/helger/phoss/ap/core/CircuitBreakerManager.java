@@ -27,9 +27,16 @@ import org.slf4j.LoggerFactory;
 
 import com.helger.annotation.concurrent.ThreadSafe;
 import com.helger.annotation.style.VisibleForTesting;
+import com.helger.annotation.style.ReturnsMutableCopy;
 import com.helger.base.string.StringHelper;
+import com.helger.collection.commons.CommonsArrayList;
+import com.helger.collection.commons.ICommonsList;
 import com.helger.datetime.helper.PDTFactory;
 import com.helger.phoss.ap.api.config.APConfigurationProperties;
+import com.helger.phoss.ap.api.model.CircuitBreakerInfo;
+import com.helger.phoss.ap.api.otel.CPhossAPOtel;
+import com.helger.phoss.ap.core.metrics.APMetrics;
+import com.helger.telemetry.TelemetryAttributes;
 
 import dev.failsafe.CircuitBreaker;
 import dev.failsafe.CircuitBreakerBuilder;
@@ -217,10 +224,26 @@ public final class CircuitBreakerManager
     return aBuilder.withFailureThreshold (nFailureThreshold);
   }
 
+  @NonNull
+  private static TelemetryAttributes _getMetricAttrs (@NonNull final String sCircuitKey, @NonNull final String sState)
+  {
+    return TelemetryAttributes.builder ()
+                              .put (CPhossAPOtel.ATTR_CIRCUIT_BREAKER_KEY, sCircuitKey)
+                              .put (CPhossAPOtel.ATTR_CIRCUIT_BREAKER_STATE, sState)
+                              .build ();
+  }
+
+  private static void _onStateChange (@NonNull final String sCircuitKey, @NonNull final String sNewState)
+  {
+    APMetrics.CIRCUIT_BREAKER_STATE_CHANGES.add (1, _getMetricAttrs (sCircuitKey, sNewState));
+  }
+
   private static void _onOpen (@NonNull final String sCircuitKey)
   {
     final BreakerState aState = _getState (sCircuitKey);
     aState.m_aOpenSinceDT = PDTFactory.getCurrentOffsetDateTimeUTC ();
+
+    _onStateChange (sCircuitKey, "OPEN");
 
     final String sLastFailureCause = aState.m_sLastFailureCause;
     LOGGER.warn ("The circuit breaker for '" +
@@ -233,7 +256,14 @@ public final class CircuitBreakerManager
   private static void _onClose (@NonNull final String sCircuitKey)
   {
     _getState (sCircuitKey).m_aOpenSinceDT = null;
+    _onStateChange (sCircuitKey, "CLOSED");
     LOGGER.info ("The circuit breaker for '" + sCircuitKey + "' was closed");
+  }
+
+  private static void _onHalfOpen (@NonNull final String sCircuitKey)
+  {
+    _onStateChange (sCircuitKey, "HALF_OPEN");
+    LOGGER.info ("The circuit breaker for '" + sCircuitKey + "' was half-opened");
   }
 
   @NonNull
@@ -245,9 +275,7 @@ public final class CircuitBreakerManager
                                                                          .withSuccessThreshold (APCoreConfig.getCircuitBreakerHalfOpenMaxAttempts ())
                                                                          .onOpen (e -> _onOpen (k))
                                                                          .onClose (e -> _onClose (k))
-                                                                         .onHalfOpen (e -> LOGGER.info ("The circuit breaker for '" +
-                                                                                                        k +
-                                                                                                        "' was half-opened"))
+                                                                         .onHalfOpen (e -> _onHalfOpen (k))
                                                                          .build ();
     });
   }
@@ -262,7 +290,12 @@ public final class CircuitBreakerManager
    */
   public static boolean tryAcquirePermit (@NonNull final String sCircuitKey)
   {
-    return _getOrCreate (sCircuitKey).tryAcquirePermit ();
+    final CircuitBreaker <Void> aBreaker = _getOrCreate (sCircuitKey);
+    if (aBreaker.tryAcquirePermit ())
+      return true;
+
+    APMetrics.CIRCUIT_BREAKER_REJECTIONS.add (1, _getMetricAttrs (sCircuitKey, aBreaker.getState ().toString ()));
+    return false;
   }
 
   /**
@@ -357,6 +390,57 @@ public final class CircuitBreakerManager
   public static Duration getRemainingDelay (@NonNull final String sCircuitKey)
   {
     return _getOrCreate (sCircuitKey).getRemainingDelay ();
+  }
+
+  /**
+   * Get a snapshot of all known circuit breakers, ordered by their key. A circuit breaker only
+   * becomes known once it was used for the first time, so a key that never rejected or recorded
+   * anything is not contained.
+   *
+   * @return A list of snapshots. Never <code>null</code>.
+   * @since 0.13.0
+   */
+  @NonNull
+  @ReturnsMutableCopy
+  public static ICommonsList <CircuitBreakerInfo> getAllInfos ()
+  {
+    final ICommonsList <CircuitBreakerInfo> ret = new CommonsArrayList <> ();
+    for (final var aEntry : BREAKERS.entrySet ())
+    {
+      final String sCircuitKey = aEntry.getKey ();
+      final CircuitBreaker <Void> aBreaker = aEntry.getValue ();
+      final BreakerState aState = _getState (sCircuitKey);
+      ret.add (new CircuitBreakerInfo (sCircuitKey,
+                                       aBreaker.getState ().toString (),
+                                       aState.m_aOpenSinceDT,
+                                       aBreaker.getRemainingDelay (),
+                                       aBreaker.getFailureCount (),
+                                       aState.m_sLastFailureCause));
+    }
+    ret.sort ( (x, y) -> x.circuitKey ().compareTo (y.circuitKey ()));
+    return ret;
+  }
+
+  /**
+   * Reset the circuit breaker identified by the given key: it is forgotten entirely, so that the
+   * next usage of the key creates a new, closed circuit breaker from the current configuration.
+   * This is the operational escape hatch for a circuit breaker that suspends a remote system which
+   * is known to be healthy again.
+   *
+   * @param sCircuitKey
+   *        The circuit breaker key to reset. May not be <code>null</code>.
+   * @return {@code true} if a circuit breaker with that key existed, {@code false} if not.
+   * @since 0.13.0
+   */
+  public static boolean reset (@NonNull final String sCircuitKey)
+  {
+    STATES.remove (sCircuitKey);
+    final boolean bExisted = BREAKERS.remove (sCircuitKey) != null;
+    if (bExisted)
+      LOGGER.info ("The circuit breaker for '" + sCircuitKey + "' was manually reset");
+    else
+      LOGGER.warn ("Cannot reset the unknown circuit breaker '" + sCircuitKey + "'");
+    return bExisted;
   }
 
   /**
