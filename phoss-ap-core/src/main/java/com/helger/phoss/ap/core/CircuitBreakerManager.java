@@ -17,15 +17,19 @@
 package com.helger.phoss.ap.core;
 
 import java.time.Duration;
+import java.time.OffsetDateTime;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.helger.annotation.concurrent.ThreadSafe;
-import com.helger.phoss.ap.api.config.APConfigurationProperties;
 import com.helger.annotation.style.VisibleForTesting;
+import com.helger.base.string.StringHelper;
+import com.helger.datetime.helper.PDTFactory;
+import com.helger.phoss.ap.api.config.APConfigurationProperties;
 
 import dev.failsafe.CircuitBreaker;
 import dev.failsafe.CircuitBreakerBuilder;
@@ -38,15 +42,55 @@ import dev.failsafe.CircuitBreakerBuilder;
 @ThreadSafe
 public final class CircuitBreakerManager
 {
+  /**
+   * The per-key data that Failsafe itself does not keep: when the circuit breaker was opened and
+   * what the last failure was. Both are needed to turn a rejection into a message an operator can
+   * act on.
+   */
+  private static final class BreakerState
+  {
+    private volatile OffsetDateTime m_aOpenSinceDT;
+    private volatile String m_sLastFailureCause;
+  }
+
   private static final Logger LOGGER = LoggerFactory.getLogger (CircuitBreakerManager.class);
 
   /** The minimum failure thresholding period accepted by Failsafe. */
   private static final long MIN_FAILURE_PERIOD_MILLIS = 10;
+  /** The maximum length of the remembered last failure cause. */
+  private static final int MAX_FAILURE_CAUSE_LENGTH = 200;
 
   private static final ConcurrentHashMap <String, CircuitBreaker <Void>> BREAKERS = new ConcurrentHashMap <> ();
+  private static final ConcurrentHashMap <String, BreakerState> STATES = new ConcurrentHashMap <> ();
 
   private CircuitBreakerManager ()
   {}
+
+  @NonNull
+  private static BreakerState _getState (@NonNull final String sCircuitKey)
+  {
+    return STATES.computeIfAbsent (sCircuitKey, k -> new BreakerState ());
+  }
+
+  /**
+   * Build the short representation of a failure cause: the simple exception class name plus its
+   * message, truncated to {@link #MAX_FAILURE_CAUSE_LENGTH} characters.
+   *
+   * @param aCause
+   *        The causing exception. May be <code>null</code>.
+   * @return <code>null</code> if no cause was provided.
+   */
+  @Nullable
+  private static String _getShortFailureCause (@Nullable final Throwable aCause)
+  {
+    if (aCause == null)
+      return null;
+
+    final String sMessage = aCause.getMessage ();
+    final String sRet = StringHelper.isEmpty (sMessage) ? aCause.getClass ().getSimpleName ()
+                                                        : aCause.getClass ().getSimpleName () + ": " + sMessage;
+    return sRet.length () > MAX_FAILURE_CAUSE_LENGTH ? sRet.substring (0, MAX_FAILURE_CAUSE_LENGTH) + "..." : sRet;
+  }
 
   /**
    * Apply the configured failure thresholding to the provided circuit breaker builder. Three modes
@@ -173,6 +217,25 @@ public final class CircuitBreakerManager
     return aBuilder.withFailureThreshold (nFailureThreshold);
   }
 
+  private static void _onOpen (@NonNull final String sCircuitKey)
+  {
+    final BreakerState aState = _getState (sCircuitKey);
+    aState.m_aOpenSinceDT = PDTFactory.getCurrentOffsetDateTimeUTC ();
+
+    final String sLastFailureCause = aState.m_sLastFailureCause;
+    LOGGER.warn ("The circuit breaker for '" +
+                 sCircuitKey +
+                 "' was opened for " +
+                 APCoreConfig.getCircuitBreakerOpenDuration () +
+                 (sLastFailureCause != null ? "; last failure: " + sLastFailureCause : ""));
+  }
+
+  private static void _onClose (@NonNull final String sCircuitKey)
+  {
+    _getState (sCircuitKey).m_aOpenSinceDT = null;
+    LOGGER.info ("The circuit breaker for '" + sCircuitKey + "' was closed");
+  }
+
   @NonNull
   private static CircuitBreaker <Void> _getOrCreate (@NonNull final String sCircuitKey)
   {
@@ -180,12 +243,8 @@ public final class CircuitBreakerManager
       LOGGER.info ("Creating circuit breaker for '" + k + "'");
       return _applyFailureThreshold (CircuitBreaker.<Void> builder (), k).withDelay (APCoreConfig.getCircuitBreakerOpenDuration ())
                                                                          .withSuccessThreshold (APCoreConfig.getCircuitBreakerHalfOpenMaxAttempts ())
-                                                                         .onOpen (e -> LOGGER.info ("The circuit breaker for '" +
-                                                                                                    k +
-                                                                                                    "' was opened"))
-                                                                         .onClose (e -> LOGGER.info ("The circuit breaker for '" +
-                                                                                                     k +
-                                                                                                     "' was closed"))
+                                                                         .onOpen (e -> _onOpen (k))
+                                                                         .onClose (e -> _onClose (k))
                                                                          .onHalfOpen (e -> LOGGER.info ("The circuit breaker for '" +
                                                                                                         k +
                                                                                                         "' was half-opened"))
@@ -226,7 +285,62 @@ public final class CircuitBreakerManager
    */
   public static void recordFailure (@NonNull final String sCircuitKey)
   {
+    recordFailure (sCircuitKey, null);
+  }
+
+  /**
+   * Record a failed operation for the circuit breaker identified by the given key, remembering the
+   * causing exception. If the failure threshold is reached, the circuit breaker will open and the
+   * cause becomes part of the rejection message of every subsequent call.
+   *
+   * @param sCircuitKey
+   *        The circuit breaker key to record the failure for. May not be <code>null</code>.
+   * @param aCause
+   *        The exception that caused the failure. May be <code>null</code>, in which case a
+   *        previously remembered cause is kept.
+   * @since 0.13.0
+   */
+  public static void recordFailure (@NonNull final String sCircuitKey, @Nullable final Throwable aCause)
+  {
+    final String sShortFailureCause = _getShortFailureCause (aCause);
+    if (sShortFailureCause != null)
+      _getState (sCircuitKey).m_sLastFailureCause = sShortFailureCause;
+
     _getOrCreate (sCircuitKey).recordFailure ();
+  }
+
+  /**
+   * Build an actionable message for a call that was rejected by a circuit breaker. It names the
+   * current state, since when the circuit breaker is open, how long it stays open, how many
+   * failures were counted and what the last failure was - everything an operator needs to decide
+   * whether to wait or to look at the remote system.
+   *
+   * @param sCircuitKey
+   *        The circuit breaker key that rejected the call. May not be <code>null</code>.
+   * @param sWhatIsSuspended
+   *        Description of what is suspended, e.g.
+   *        <code>"SMP access to 'https://smp.example.org'"</code>. May not be <code>null</code>.
+   * @return The rejection message. Never <code>null</code>.
+   * @since 0.13.0
+   */
+  @NonNull
+  public static String getRejectionMessage (@NonNull final String sCircuitKey,
+                                            @NonNull final String sWhatIsSuspended)
+  {
+    final CircuitBreaker <Void> aBreaker = _getOrCreate (sCircuitKey);
+    final BreakerState aState = _getState (sCircuitKey);
+    final OffsetDateTime aOpenSinceDT = aState.m_aOpenSinceDT;
+    final String sLastFailureCause = aState.m_sLastFailureCause;
+
+    final StringBuilder aSB = new StringBuilder (sWhatIsSuspended).append (" suspended by circuit breaker (state ")
+                                                                  .append (aBreaker.getState ());
+    if (aOpenSinceDT != null)
+      aSB.append (" since ").append (aOpenSinceDT);
+    aSB.append (", ").append (aBreaker.getRemainingDelay ().toSeconds ()).append ("s remaining) after ");
+    aSB.append (aBreaker.getFailureCount ()).append (" failures");
+    if (sLastFailureCause != null)
+      aSB.append ("; last failure: ").append (sLastFailureCause);
+    return aSB.toString ();
   }
 
   /**
@@ -253,5 +367,6 @@ public final class CircuitBreakerManager
   public static void removeAll ()
   {
     BREAKERS.clear ();
+    STATES.clear ();
   }
 }

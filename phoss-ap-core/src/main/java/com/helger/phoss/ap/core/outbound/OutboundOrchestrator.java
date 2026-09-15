@@ -734,13 +734,17 @@ public final class OutboundOrchestrator
         if (!CircuitBreakerManager.tryAcquirePermit (sCircuitBreakerKeySMP))
         {
           aLookupSW.stop ();
-          aSendingReport.setLookupError ("SMP access limited by Circuit Breaker");
+          aSendingReport.setLookupError (CircuitBreakerManager.getRejectionMessage (sCircuitBreakerKeySMP,
+                                                                                    "SMP access to '" +
+                                                                                                           aSMPClient.getSMPHostURI () +
+                                                                                                           "'"));
           aSendingReport.setLookupDurationMillis (aLookupSW.getMillis ());
 
           // The SMP was not contacted at all, so this must not consume a retry attempt
-          return SmpLookupResult.circuitOpen ("SMP access limited by Circuit Breaker '" +
-                                              sCircuitBreakerKeySMP +
-                                              "'",
+          return SmpLookupResult.circuitOpen (CircuitBreakerManager.getRejectionMessage (sCircuitBreakerKeySMP,
+                                                                                         "SMP access to '" +
+                                                                                                                aSMPClient.getSMPHostURI () +
+                                                                                                                "'"),
                                               CircuitBreakerManager.getRemainingDelay (sCircuitBreakerKeySMP));
         }
 
@@ -783,7 +787,11 @@ public final class OutboundOrchestrator
             if (eFailureKind.isNegativeAnswer ())
               CircuitBreakerManager.recordSuccess (sCircuitBreakerKeySMP);
             else
-              CircuitBreakerManager.recordFailure (sCircuitBreakerKeySMP);
+            {
+              // The cause of a Phase4SMPException is the SMP client exception, which is the
+              // interesting one for an operator
+              CircuitBreakerManager.recordFailure (sCircuitBreakerKeySMP, ex.getCause () != null ? ex.getCause () : ex);
+            }
             bResultRecorded = true;
 
             aLookupSW.stop ();
@@ -1576,7 +1584,7 @@ public final class OutboundOrchestrator
             if (aSendingReport.isSendingSuccess ())
               CircuitBreakerManager.recordSuccess (sCircuitBreakerKeyAP);
             else
-              CircuitBreakerManager.recordFailure (sCircuitBreakerKeyAP);
+              CircuitBreakerManager.recordFailure (sCircuitBreakerKeyAP, aSendingReport.getAS4SendingException ());
             bResultRecorded = true;
           }
           finally
@@ -1590,15 +1598,18 @@ public final class OutboundOrchestrator
         {
           // Circuit Breaker not acquired
           aSendingSW.stop ();
-          aSendingReport.setAS4SendingError ("AP access limited by Circuit Breaker");
+          final String sRejectionMsg = CircuitBreakerManager.getRejectionMessage (sCircuitBreakerKeyAP,
+                                                                                  "AP access to '" +
+                                                                                                       sReceiverAPURL +
+                                                                                                       "'");
+          aSendingReport.setAS4SendingError (sRejectionMsg);
           aSendingReport.setAS4SendingDurationMillis (aSendingSW.getMillis ());
           aSendingReport.setSendingSuccess (false);
           aSendingReport.setOverallSuccess (false);
 
           // Call after any Sending Report modifications. The AP was not contacted at all, so this
           // must not consume a retry attempt either
-          onCircuitOpen.accept ("AP access limited by Circuit Breaker '" + sCircuitBreakerKeyAP + "'",
-                                CircuitBreakerManager.getRemainingDelay (sCircuitBreakerKeyAP));
+          onCircuitOpen.accept (sRejectionMsg, CircuitBreakerManager.getRemainingDelay (sCircuitBreakerKeyAP));
         }
       }
       catch (final RuntimeException ex)

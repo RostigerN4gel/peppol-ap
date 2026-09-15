@@ -1357,12 +1357,14 @@ public final class InboundOrchestrator
 
             // Actual forwarding
             ForwardingResult aResult;
+            Throwable aForwardingCause = null;
             try
             {
               aResult = aForwarder.forwardDocument (ForwardableDocument.fromInbound (aInboundTx));
             }
             catch (final Exception ex)
             {
+              aForwardingCause = ex;
               // Be resilient...
               aResult = ForwardingResult.failure ("forward_exception",
                                                   "Internal error forwarding the document: " +
@@ -1458,7 +1460,7 @@ public final class InboundOrchestrator
             }
 
             // Forwarding failed
-            CircuitBreakerManager.recordFailure (sCircuitBreakerID);
+            CircuitBreakerManager.recordFailure (sCircuitBreakerID, aForwardingCause);
             bResultRecorded = true;
             aAttemptMgr.createFailure (aInboundTx.getID (), aResult.getErrorCode (), aResult.getErrorDetails ());
 
@@ -1514,10 +1516,11 @@ public final class InboundOrchestrator
           // nothing was tried
           final OffsetDateTime aNextRetry = aTimestampMgr.getCurrentDateTimeUTC ()
                                                          .plus (APCoreConfig.getRetryForwardingInitialBackoff ());
+          final String sRejectionMsg = CircuitBreakerManager.getRejectionMessage (sCircuitBreakerID,
+                                                                                  "Document forwarding");
           LOGGER.warn (sLogPrefix +
-                       "The circuit breaker '" +
-                       sCircuitBreakerID +
-                       "' is open - not forwarding transaction '" +
+                       sRejectionMsg +
+                       " - not forwarding transaction '" +
                        aInboundTx.getID () +
                        "' now, retrying at " +
                        aNextRetry);
@@ -1525,7 +1528,7 @@ public final class InboundOrchestrator
                                        EInboundStatus.FORWARD_FAILED,
                                        aInboundTx.getAttemptCount (),
                                        aNextRetry,
-                                       "The circuit breaker '" + sCircuitBreakerID + "' is open");
+                                       sRejectionMsg);
         }
       }
       catch (final RuntimeException ex)

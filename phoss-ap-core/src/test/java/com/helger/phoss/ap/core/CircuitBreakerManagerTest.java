@@ -16,9 +16,14 @@
  */
 package com.helger.phoss.ap.core;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
+
+import java.net.SocketTimeoutException;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 
 import org.junit.After;
 import org.junit.Before;
@@ -27,6 +32,7 @@ import org.junit.Test;
 import com.helger.config.ConfigFactory;
 import com.helger.config.fallback.ConfigWithFallback;
 import com.helger.config.fallback.IConfigWithFallback;
+import com.helger.datetime.helper.PDTFactory;
 import com.helger.phoss.ap.api.config.APConfigProvider;
 import com.helger.phoss.ap.api.config.APConfigurationProperties;
 
@@ -237,6 +243,75 @@ public final class CircuitBreakerManagerTest
       CircuitBreakerManager.recordFailure (KEY);
     }
     assertFalse (CircuitBreakerManager.tryAcquirePermit (KEY));
+  }
+
+  @Test
+  public void testRejectionMessageContainsStateOpenSinceRemainingDelayAndCause ()
+  {
+    _setSystemProperty (APConfigurationProperties.CIRCUIT_BREAKER_FAILURE_THRESHOLD, "2");
+    _setSystemProperty (APConfigurationProperties.CIRCUIT_BREAKER_OPEN_DURATION, "1m");
+    APConfigProvider.setConfig (new ConfigWithFallback (ConfigFactory.createDefaultValueProvider ()));
+    CircuitBreakerManager.removeAll ();
+
+    final OffsetDateTime aBeforeDT = PDTFactory.getCurrentOffsetDateTimeUTC ();
+    for (int i = 0; i < 2; ++i)
+    {
+      assertTrue (CircuitBreakerManager.tryAcquirePermit (KEY));
+      CircuitBreakerManager.recordFailure (KEY, new SocketTimeoutException ("Read timed out after 10000 ms"));
+    }
+    assertFalse (CircuitBreakerManager.tryAcquirePermit (KEY));
+
+    final String sMsg = CircuitBreakerManager.getRejectionMessage (KEY,
+                                                                   "SMP access to 'https://smp.example.org'");
+    assertTrue (sMsg, sMsg.startsWith ("SMP access to 'https://smp.example.org' suspended by circuit breaker ("));
+    assertTrue (sMsg, sMsg.contains ("state OPEN since "));
+    assertTrue (sMsg, sMsg.contains ("s remaining) after "));
+    assertTrue (sMsg, sMsg.contains (" failures;"));
+    assertTrue (sMsg, sMsg.contains ("last failure: SocketTimeoutException: Read timed out after 10000 ms"));
+
+    // The "open since" timestamp is a UTC ISO-8601 timestamp of this test run
+    final int nSinceIdx = sMsg.indexOf ("since ") + "since ".length ();
+    final String sOpenSince = sMsg.substring (nSinceIdx, sMsg.indexOf (',', nSinceIdx));
+    final OffsetDateTime aOpenSinceDT = OffsetDateTime.parse (sOpenSince);
+    assertEquals (ZoneOffset.UTC, aOpenSinceDT.getOffset ());
+    assertTrue ("Open since " + aOpenSinceDT + " is before the test started at " + aBeforeDT,
+                !aOpenSinceDT.isBefore (aBeforeDT));
+  }
+
+  @Test
+  public void testRejectionMessageWithoutAKnownCause ()
+  {
+    _setSystemProperty (APConfigurationProperties.CIRCUIT_BREAKER_FAILURE_THRESHOLD, "2");
+    _setSystemProperty (APConfigurationProperties.CIRCUIT_BREAKER_OPEN_DURATION, "1m");
+    APConfigProvider.setConfig (new ConfigWithFallback (ConfigFactory.createDefaultValueProvider ()));
+    CircuitBreakerManager.removeAll ();
+
+    for (int i = 0; i < 2; ++i)
+    {
+      assertTrue (CircuitBreakerManager.tryAcquirePermit (KEY));
+      CircuitBreakerManager.recordFailure (KEY);
+    }
+
+    final String sMsg = CircuitBreakerManager.getRejectionMessage (KEY, "Document forwarding");
+    assertTrue (sMsg, sMsg.startsWith ("Document forwarding suspended by circuit breaker (state OPEN since "));
+    assertFalse (sMsg, sMsg.contains ("last failure"));
+  }
+
+  @Test
+  public void testTheLastFailureCauseIsTruncated ()
+  {
+    CircuitBreakerManager.removeAll ();
+    CircuitBreakerManager.tryAcquirePermit (KEY);
+    CircuitBreakerManager.recordFailure (KEY, new IllegalStateException ("x".repeat (500)));
+
+    final String sMsg = CircuitBreakerManager.getRejectionMessage (KEY, "Something");
+    final String sMarker = "last failure: ";
+    assertTrue (sMsg, sMsg.contains (sMarker + "IllegalStateException: "));
+    assertTrue (sMsg, sMsg.endsWith ("..."));
+
+    // 200 characters plus the "..." marker
+    final String sCause = sMsg.substring (sMsg.indexOf (sMarker) + sMarker.length ());
+    assertEquals (203, sCause.length ());
   }
 
   @Test
