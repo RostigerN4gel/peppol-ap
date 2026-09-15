@@ -16,6 +16,7 @@
  */
 package com.helger.phoss.ap.core;
 
+import java.time.Duration;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.jspecify.annotations.NonNull;
@@ -92,6 +93,22 @@ public final class CircuitBreakerManager
   public static void recordFailure (@NonNull final String sCircuitKey)
   {
     _getOrCreate (sCircuitKey).recordFailure ();
+  }
+
+  /**
+   * Get the remaining delay until the circuit breaker identified by the given key transitions from
+   * the open state to the half-open state. A circuit breaker that is not open returns
+   * {@link Duration#ZERO}.
+   *
+   * @param sCircuitKey
+   *        The circuit breaker key to query. May not be <code>null</code>.
+   * @return The remaining delay. Never <code>null</code>.
+   * @since 0.13.0
+   */
+  @NonNull
+  public static Duration getRemainingDelay (@NonNull final String sCircuitKey)
+  {
+    return _getOrCreate (sCircuitKey).getRemainingDelay ();
   }
 
   /**

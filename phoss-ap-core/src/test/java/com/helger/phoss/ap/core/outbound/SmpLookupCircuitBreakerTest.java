@@ -18,9 +18,12 @@ package com.helger.phoss.ap.core.outbound;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 import java.net.SocketTimeoutException;
+import java.time.Duration;
+import java.time.OffsetDateTime;
 
 import org.junit.After;
 import org.junit.Before;
@@ -33,6 +36,7 @@ import com.helger.phase4.dynamicdiscovery.Phase4SMPException;
 import com.helger.phase4.util.Phase4Exception;
 import com.helger.phoss.ap.api.config.APConfigProvider;
 import com.helger.phoss.ap.api.config.APConfigurationProperties;
+import com.helger.datetime.helper.PDTFactory;
 import com.helger.phoss.ap.core.CircuitBreakerManager;
 import com.helger.smpclient.exception.SMPClientSMPUnavailableException;
 
@@ -111,6 +115,36 @@ public final class SmpLookupCircuitBreakerTest
     assertTrue ("phase4 reports a negative answer as retry feasible", aEx.isRetryFeasible ());
     assertTrue (SmpLookupFailureClassifier.getFailureKind (aEx).isNegativeAnswer ());
     assertFalse (SmpLookupFailureClassifier.getFailureKind (aEx).isSmpUnavailable ());
+  }
+
+  @Test
+  public void testRejectedLookupKeepsTheAttemptCountAndWaitsForTheRemainingDelay ()
+  {
+    final Phase4SMPException aEx = (Phase4SMPException) new Phase4SMPException ("Failed to resolve SMP endpoint (x)",
+                                                                                new SMPClientSMPUnavailableException (new SocketTimeoutException ("Read timed out"))).setRetryFeasible (false);
+    for (int i = 0; i < FAILURE_THRESHOLD; ++i)
+    {
+      assertTrue (CircuitBreakerManager.tryAcquirePermit (KEY));
+      _recordLookupFailure (aEx);
+    }
+
+    // The next lookup is rejected - the SMP is not contacted at all
+    assertFalse (CircuitBreakerManager.tryAcquirePermit (KEY));
+
+    final Duration aRemainingDelay = CircuitBreakerManager.getRemainingDelay (KEY);
+    assertTrue ("An open circuit breaker must have a remaining delay", aRemainingDelay.toMillis () > 0);
+
+    // This is what OutboundOrchestrator does with the rejection - note that the attempt count is
+    // not part of the calculation at all, because it is passed through unchanged
+    final OffsetDateTime aNow = PDTFactory.getCurrentOffsetDateTimeUTC ();
+    final OffsetDateTime aNextRetry = OutboundOrchestrator.getCircuitBreakerNextRetryDT (aNow,
+                                                                                         aNow.minusMinutes (5),
+                                                                                         aRemainingDelay,
+                                                                                         Duration.ofMinutes (1),
+                                                                                         Duration.ofHours (12));
+    assertNotNull (aNextRetry);
+    assertTrue ("The next retry must not be before the circuit breaker may grant a permit again",
+                !aNextRetry.isBefore (aNow.plus (aRemainingDelay)));
   }
 
   @Test

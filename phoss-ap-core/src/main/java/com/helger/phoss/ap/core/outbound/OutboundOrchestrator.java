@@ -24,6 +24,7 @@ import java.security.MessageDigest;
 import java.security.cert.X509Certificate;
 import java.time.Duration;
 import java.time.OffsetDateTime;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 import org.jspecify.annotations.NonNull;
@@ -32,6 +33,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.helger.annotation.WillNotClose;
+import com.helger.annotation.style.VisibleForTesting;
 import com.helger.base.io.stream.CountingInputStream;
 import com.helger.base.io.stream.HasInputStream;
 import com.helger.base.io.stream.StreamHelper;
@@ -120,7 +122,14 @@ public final class OutboundOrchestrator
     /** The receiver participant or the requested service is not registered (not retry feasible). */
     NOT_REGISTERED,
     /** A transient error occurred, the same receiver should be retried later. */
-    RETRY
+    RETRY,
+    /**
+     * The SMP circuit breaker is open, so the SMP was not contacted at all. The transaction must
+     * be retried without consuming a retry attempt.
+     *
+     * @since 0.13.0
+     */
+    CIRCUIT_OPEN
   }
 
   /**
@@ -133,18 +142,21 @@ public final class OutboundOrchestrator
     private final String m_sReceiverAPURL;
     private final String m_sReceiverTechnicalContact;
     private final String m_sErrorMessage;
+    private final Duration m_aRemainingDelay;
 
     private SmpLookupResult (@NonNull final ESmpLookupState eState,
                              @Nullable final X509Certificate aReceiverCert,
                              @Nullable final String sReceiverAPURL,
                              @Nullable final String sReceiverTechnicalContact,
-                             @Nullable final String sErrorMessage)
+                             @Nullable final String sErrorMessage,
+                             @Nullable final Duration aRemainingDelay)
     {
       m_eState = eState;
       m_aReceiverCert = aReceiverCert;
       m_sReceiverAPURL = sReceiverAPURL;
       m_sReceiverTechnicalContact = sReceiverTechnicalContact;
       m_sErrorMessage = sErrorMessage;
+      m_aRemainingDelay = aRemainingDelay;
     }
 
     @NonNull
@@ -177,6 +189,16 @@ public final class OutboundOrchestrator
       return m_sErrorMessage;
     }
 
+    /**
+     * @return The remaining delay of the circuit breaker. Only set for
+     *         {@link ESmpLookupState#CIRCUIT_OPEN}.
+     */
+    @Nullable
+    Duration getRemainingDelay ()
+    {
+      return m_aRemainingDelay;
+    }
+
     @NonNull
     static SmpLookupResult success (@Nullable final X509Certificate aReceiverCert,
                                     @Nullable final String sReceiverAPURL,
@@ -186,19 +208,26 @@ public final class OutboundOrchestrator
                                   aReceiverCert,
                                   sReceiverAPURL,
                                   sReceiverTechnicalContact,
+                                  null,
                                   null);
     }
 
     @NonNull
     static SmpLookupResult notRegistered (@NonNull final String sErrorMessage)
     {
-      return new SmpLookupResult (ESmpLookupState.NOT_REGISTERED, null, null, null, sErrorMessage);
+      return new SmpLookupResult (ESmpLookupState.NOT_REGISTERED, null, null, null, sErrorMessage, null);
     }
 
     @NonNull
     static SmpLookupResult retry (@NonNull final String sErrorMessage)
     {
-      return new SmpLookupResult (ESmpLookupState.RETRY, null, null, null, sErrorMessage);
+      return new SmpLookupResult (ESmpLookupState.RETRY, null, null, null, sErrorMessage, null);
+    }
+
+    @NonNull
+    static SmpLookupResult circuitOpen (@NonNull final String sErrorMessage, @NonNull final Duration aRemainingDelay)
+    {
+      return new SmpLookupResult (ESmpLookupState.CIRCUIT_OPEN, null, null, null, sErrorMessage, aRemainingDelay);
     }
   }
 
@@ -708,7 +737,11 @@ public final class OutboundOrchestrator
           aSendingReport.setLookupError ("SMP access limited by Circuit Breaker");
           aSendingReport.setLookupDurationMillis (aLookupSW.getMillis ());
 
-          return SmpLookupResult.retry ("SMP access limited by Circuit Breaker '" + sCircuitBreakerKeySMP + "'");
+          // The SMP was not contacted at all, so this must not consume a retry attempt
+          return SmpLookupResult.circuitOpen ("SMP access limited by Circuit Breaker '" +
+                                              sCircuitBreakerKeySMP +
+                                              "'",
+                                              CircuitBreakerManager.getRemainingDelay (sCircuitBreakerKeySMP));
         }
 
         // The permit was acquired, so from here on exactly one result must be recorded on every
@@ -804,6 +837,45 @@ public final class OutboundOrchestrator
           aSmpSpan.setStatusError (null);
       }
     }
+  }
+
+  /**
+   * Determine when a transaction that was rejected by a circuit breaker should be retried. Such a
+   * retry does not consume a retry attempt, because nothing was tried at all - so a safety cap is
+   * needed, otherwise a permanently unreachable SMP or AP defers a transaction forever.
+   *
+   * @param aNowUTC
+   *        The current date and time in UTC. May not be <code>null</code>.
+   * @param aCreatedDT
+   *        The creation date and time of the transaction. May be <code>null</code>.
+   * @param aRemainingDelay
+   *        The remaining delay of the circuit breaker. May not be <code>null</code>.
+   * @param aMinDelay
+   *        The minimum delay to be used, even if the circuit breaker has no remaining delay left.
+   *        May not be <code>null</code>.
+   * @param aMaxDeferDuration
+   *        The maximum age of a transaction for which the rejection is deferred. May not be
+   *        <code>null</code>.
+   * @return The date and time of the next retry, or <code>null</code> if the transaction was
+   *         deferred for too long already and must be counted as a regular attempt from now on.
+   * @since 0.13.0
+   */
+  @Nullable
+  @VisibleForTesting
+  static OffsetDateTime getCircuitBreakerNextRetryDT (@NonNull final OffsetDateTime aNowUTC,
+                                                      @Nullable final OffsetDateTime aCreatedDT,
+                                                      @NonNull final Duration aRemainingDelay,
+                                                      @NonNull final Duration aMinDelay,
+                                                      @NonNull final Duration aMaxDeferDuration)
+  {
+    // Safety cap, so that a permanently unreachable SMP or AP cannot defer a transaction forever
+    if (aCreatedDT != null && Duration.between (aCreatedDT, aNowUTC).compareTo (aMaxDeferDuration) > 0)
+      return null;
+
+    // Retry as soon as the circuit breaker may grant a permit again, but not more often than the
+    // retry scheduler runs anyway
+    final Duration aEffectiveDelay = aRemainingDelay.compareTo (aMinDelay) > 0 ? aRemainingDelay : aMinDelay;
+    return aNowUTC.plus (aEffectiveDelay);
   }
 
   /**
@@ -905,6 +977,43 @@ public final class OutboundOrchestrator
                                                                                   APCoreConfig.getRetrySendingBackoffMultiplier (),
                                                                                   APCoreConfig.getRetrySendingMaxBackoff ());
           aTxMgr.updateStatusAndRetry (sTxID, EOutboundStatus.FAILED, nNewAttemptCount, aNextRetry, sErrMsg);
+        };
+
+        // Callback on a rejection by a circuit breaker. Nothing was tried at all, so this must not
+        // consume a retry attempt - otherwise a transaction can end up permanently failed without
+        // a single real attempt. No sending attempt row is created either, for the same reason;
+        // the reason is visible in the transaction error details and in the sending report
+        final BiConsumer <String, Duration> onCircuitOpen = (sErrMsg, aRemainingDelay) -> {
+          final Duration aMaxDeferDuration = APCoreConfig.getCircuitBreakerDeferMaxDuration ();
+          final OffsetDateTime aNextRetry = getCircuitBreakerNextRetryDT (aTimestampMgr.getCurrentDateTimeUTC (),
+                                                                          aTx.getCreatedDT (),
+                                                                          aRemainingDelay,
+                                                                          APCoreConfig.getRetrySchedulerInterval (),
+                                                                          aMaxDeferDuration);
+          if (aNextRetry == null)
+          {
+            LOGGER.warn (sRealLogPrefix +
+                         "Outbound transaction '" +
+                         sTxID +
+                         "' is older than " +
+                         aMaxDeferDuration +
+                         " and was deferred by a circuit breaker again - counting this as a regular attempt now");
+            onFailed.accept (sErrMsg);
+            return;
+          }
+
+          LOGGER.warn (sRealLogPrefix +
+                       sErrMsg +
+                       " - outbound transaction '" +
+                       sTxID +
+                       "' is retried at " +
+                       aNextRetry +
+                       " without consuming a retry attempt (attempt count stays at " +
+                       aTx.getAttemptCount () +
+                       ")");
+
+          // The attempt count is left unchanged, because nothing was tried
+          aTxMgr.updateStatusAndRetry (sTxID, EOutboundStatus.FAILED, aTx.getAttemptCount (), aNextRetry, sErrMsg);
         };
 
         // Callback on permanent failure
@@ -1076,24 +1185,30 @@ public final class OutboundOrchestrator
           if (aLookupResult.getState () != ESmpLookupState.SUCCESS)
           {
             final String sErrMsg = aLookupResult.getErrorMessage ();
-            if (aLookupResult.getState () == ESmpLookupState.RETRY)
+            if (aLookupResult.getState () == ESmpLookupState.CIRCUIT_OPEN)
             {
-              // Transient error - queue and retry the same receiver
-              onFailed.accept (sErrMsg);
+              // The SMP was not contacted at all - queue and retry without consuming an attempt
+              onCircuitOpen.accept (sErrMsg, aLookupResult.getRemainingDelay ());
             }
             else
-              if (aEffectiveMlsFallback != null)
+              if (aLookupResult.getState () == ESmpLookupState.RETRY)
               {
-                // MLS SPOG section 5.4: the (default SPID) MLS receiver is not reachable - queue
-                // and retry per PNP Rule MLS-4 instead of failing permanently
+                // Transient error - queue and retry the same receiver
                 onFailed.accept (sErrMsg);
               }
               else
-              {
-                // Regular document: the participant or service is not registered - permanent
-                // failure
-                onPermanentFailure.accept (sErrMsg);
-              }
+                if (aEffectiveMlsFallback != null)
+                {
+                  // MLS SPOG section 5.4: the (default SPID) MLS receiver is not reachable - queue
+                  // and retry per PNP Rule MLS-4 instead of failing permanently
+                  onFailed.accept (sErrMsg);
+                }
+                else
+                {
+                  // Regular document: the participant or service is not registered - permanent
+                  // failure
+                  onPermanentFailure.accept (sErrMsg);
+                }
             return aSendingReport;
           }
 
@@ -1480,8 +1595,10 @@ public final class OutboundOrchestrator
           aSendingReport.setSendingSuccess (false);
           aSendingReport.setOverallSuccess (false);
 
-          // Call after any Sending Report modifications
-          onFailed.accept ("AP access limited by Circuit Breaker '" + sCircuitBreakerKeyAP + "'");
+          // Call after any Sending Report modifications. The AP was not contacted at all, so this
+          // must not consume a retry attempt either
+          onCircuitOpen.accept ("AP access limited by Circuit Breaker '" + sCircuitBreakerKeyAP + "'",
+                                CircuitBreakerManager.getRemainingDelay (sCircuitBreakerKeyAP));
         }
       }
       catch (final RuntimeException ex)

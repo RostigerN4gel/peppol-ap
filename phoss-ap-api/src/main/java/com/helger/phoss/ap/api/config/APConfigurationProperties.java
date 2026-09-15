@@ -321,6 +321,16 @@ public final class APConfigurationProperties
   public static final long CIRCUIT_BREAKER_OPEN_DURATION_MS_DEFAULT = 60_000L;
   public static final String CIRCUIT_BREAKER_HALF_OPEN_MAX_ATTEMPTS = "circuit-breaker.half-open-max-attempts";
   public static final int CIRCUIT_BREAKER_HALF_OPEN_MAX_ATTEMPTS_DEFAULT = 1;
+  /**
+   * The maximum age of a transaction for which a rejection by the circuit breaker is deferred
+   * without consuming a retry attempt. Older transactions fall back to the regular attempt
+   * counting, so that a permanently unreachable SMP or AP cannot defer a transaction forever.
+   *
+   * @since 0.13.0
+   */
+  public static final String CIRCUIT_BREAKER_DEFER_MAX_DURATION = "circuit-breaker.defer-max-duration";
+  /** @since 0.13.0 */
+  public static final Duration CIRCUIT_BREAKER_DEFER_MAX_DURATION_DEFAULT = Duration.ofHours (12);
 
   // Verification
   public static final String VERIFICATION_OUTBOUND_ENABLED = "verification.outbound.enabled";

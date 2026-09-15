@@ -571,6 +571,18 @@ public final class APCoreConfig
   }
 
   /**
+   * @return The maximum age of a transaction for which a rejection by a circuit breaker is
+   *         deferred without consuming a retry attempt. Never <code>null</code>.
+   * @since 0.13.0
+   */
+  @NonNull
+  public static Duration getCircuitBreakerDeferMaxDuration ()
+  {
+    return _getDuration (APConfigurationProperties.CIRCUIT_BREAKER_DEFER_MAX_DURATION,
+                         APConfigurationProperties.CIRCUIT_BREAKER_DEFER_MAX_DURATION_DEFAULT);
+  }
+
+  /**
    * @return {@code true} if the outbound S3 submission endpoint is enabled.
    * @since v0.1.1
    */

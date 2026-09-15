@@ -20,6 +20,8 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
+import java.time.Duration;
+
 import org.junit.Test;
 
 import com.helger.collection.commons.CommonsLinkedHashSet;
@@ -104,6 +106,42 @@ public final class APCoreConfigTest
         System.clearProperty (APConfigurationProperties.PEPPOL_REPORTING_EXCLUDE_PARTICIPANT_IDS);
       else
         System.setProperty (APConfigurationProperties.PEPPOL_REPORTING_EXCLUDE_PARTICIPANT_IDS, sOldValue);
+
+      APConfigProvider.setConfig (aOldConfig);
+    }
+  }
+
+  @Test
+  public void testCircuitBreakerDeferMaxDuration ()
+  {
+    final IConfigWithFallback aOldConfig = APConfigProvider.getConfig ();
+    final String sOldValue = System.getProperty (APConfigurationProperties.CIRCUIT_BREAKER_DEFER_MAX_DURATION);
+
+    try
+    {
+      // Nothing configured
+      System.clearProperty (APConfigurationProperties.CIRCUIT_BREAKER_DEFER_MAX_DURATION);
+      APConfigProvider.setConfig (new ConfigWithFallback (ConfigFactory.createDefaultValueProvider ()));
+      assertEquals (APConfigurationProperties.CIRCUIT_BREAKER_DEFER_MAX_DURATION_DEFAULT,
+                    APCoreConfig.getCircuitBreakerDeferMaxDuration ());
+
+      // A valid duration
+      System.setProperty (APConfigurationProperties.CIRCUIT_BREAKER_DEFER_MAX_DURATION, "2h 30m");
+      APConfigProvider.setConfig (new ConfigWithFallback (ConfigFactory.createDefaultValueProvider ()));
+      assertEquals (Duration.ofHours (2).plusMinutes (30), APCoreConfig.getCircuitBreakerDeferMaxDuration ());
+
+      // An invalid duration falls back to the default
+      System.setProperty (APConfigurationProperties.CIRCUIT_BREAKER_DEFER_MAX_DURATION, "not a duration");
+      APConfigProvider.setConfig (new ConfigWithFallback (ConfigFactory.createDefaultValueProvider ()));
+      assertEquals (APConfigurationProperties.CIRCUIT_BREAKER_DEFER_MAX_DURATION_DEFAULT,
+                    APCoreConfig.getCircuitBreakerDeferMaxDuration ());
+    }
+    finally
+    {
+      if (sOldValue == null)
+        System.clearProperty (APConfigurationProperties.CIRCUIT_BREAKER_DEFER_MAX_DURATION);
+      else
+        System.setProperty (APConfigurationProperties.CIRCUIT_BREAKER_DEFER_MAX_DURATION, sOldValue);
 
       APConfigProvider.setConfig (aOldConfig);
     }
