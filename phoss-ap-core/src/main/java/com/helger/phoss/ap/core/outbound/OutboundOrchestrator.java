@@ -742,7 +742,15 @@ public final class OutboundOrchestrator
           }
           catch (final Phase4Exception ex)
           {
-            CircuitBreakerManager.recordFailure (sCircuitBreakerKeySMP);
+            final ESmpLookupFailureKind eFailureKind = SmpLookupFailureClassifier.getFailureKind (ex);
+
+            // A negative answer means the SMP responded just fine - only the receiver or the
+            // service is not registered. Counting that as an SMP failure suspends a large SMP for
+            // all of its participants after a few lookups for unregistered receivers
+            if (eFailureKind.isNegativeAnswer ())
+              CircuitBreakerManager.recordSuccess (sCircuitBreakerKeySMP);
+            else
+              CircuitBreakerManager.recordFailure (sCircuitBreakerKeySMP);
             bResultRecorded = true;
 
             aLookupSW.stop ();
@@ -758,6 +766,19 @@ public final class OutboundOrchestrator
             }
             aSendingReport.setLookupDurationMillis (aLookupSW.getMillis ());
 
+            if (eFailureKind.isNegativeAnswer ())
+            {
+              // Independent of isRetryFeasible() - retrying an unregistered receiver against the
+              // same SMP cannot succeed
+              return SmpLookupResult.notRegistered (ex.getMessage ());
+            }
+            if (eFailureKind.isSmpUnavailable ())
+            {
+              // Independent of isRetryFeasible() - phase4 reports a connection failure, a timeout
+              // and a HTTP 5xx as "retry not feasible", which would permanently fail a
+              // transaction just because the SMP was unreachable for a moment
+              return SmpLookupResult.retry (ex.getMessage ());
+            }
             if (ex.isRetryFeasible ())
               return SmpLookupResult.retry (ex.getMessage ());
             return SmpLookupResult.notRegistered (ex.getMessage ());
