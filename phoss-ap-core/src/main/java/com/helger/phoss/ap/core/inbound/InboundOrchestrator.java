@@ -1326,164 +1326,183 @@ public final class InboundOrchestrator
         final String sCircuitBreakerID = "phoss-ap-forwarder";
         if (CircuitBreakerManager.tryAcquirePermit (sCircuitBreakerID))
         {
-          final IDocumentForwarder aForwarder = APCoreMetaManager.getForwarder ();
-          if (aForwarder == null)
-          {
-            final String sReason = "No document forwarder configured";
-            LOGGER.error (sLogPrefix + "Internal error - " + sReason);
-            // The attempt count is left unchanged, because no forwarding was attempted
-            aTxMgr.updateStatusAndRetry (aInboundTx.getID (),
-                                         EInboundStatus.PERMANENTLY_FAILED,
-                                         aInboundTx.getAttemptCount (),
-                                         null,
-                                         sReason);
-            // C2 must get an answer, even though this is a local configuration error
-            _handlePermanentForwardingFailure (aInboundTx, sReason);
-            return ESuccess.FAILURE;
-          }
-
-          // Set status
-          aTxMgr.updateStatus (aInboundTx.getID (), EInboundStatus.FORWARDING);
-
-          // Actual forwarding
-          ForwardingResult aResult;
+          // The permit was acquired, so from here on exactly one result must be recorded on
+          // every code path. A permit that is acquired but never recorded is never released
+          // again, and after "circuit-breaker.half-open-max-attempts" leaks a half-open circuit
+          // breaker rejects every further call until the application is restarted
+          boolean bResultRecorded = false;
           try
           {
-            aResult = aForwarder.forwardDocument (ForwardableDocument.fromInbound (aInboundTx));
-          }
-          catch (final Exception ex)
-          {
-            // Be resilient...
-            aResult = ForwardingResult.failure ("forward_exception",
-                                                "Internal error forwarding the document: " +
-                                                                     ex.getMessage () +
-                                                                     " (" +
-                                                                     ex.getClass ().getName () +
-                                                                     ")");
-
-            for (final var aHandler : APCoreMetaManager.getAllNotificationHandlers ())
+            final IDocumentForwarder aForwarder = APCoreMetaManager.getForwarder ();
+            if (aForwarder == null)
             {
-              aHandler.onUnexpectedException ("InboundOrchestrator.forwardDocument",
-                                              "Internal error forwarding document for transaction '" +
-                                                                                     aInboundTx.getID () +
-                                                                                     "'",
-                                              ex);
-            }
-          }
+              final String sReason = "No document forwarder configured";
+              LOGGER.error (sLogPrefix + "Internal error - " + sReason);
+              // The attempt count is left unchanged, because no forwarding was attempted
+              aTxMgr.updateStatusAndRetry (aInboundTx.getID (),
+                                           EInboundStatus.PERMANENTLY_FAILED,
+                                           aInboundTx.getAttemptCount (),
+                                           null,
+                                           sReason);
+              // C2 must get an answer, even though this is a local configuration error
+              _handlePermanentForwardingFailure (aInboundTx, sReason);
 
-          if (aResult.isSuccess ())
-          {
-            // Forwarding worked
-            CircuitBreakerManager.recordSuccess (sCircuitBreakerID);
-            aAttemptMgr.createSuccess (aInboundTx.getID ());
-
-            aTxMgr.updateStatusCompleted (aInboundTx.getID (), EInboundStatus.FORWARDED);
-            LOGGER.info (sLogPrefix + "Forwarding successful for transaction '" + aInboundTx.getID () + "'");
-
-            final OffsetDateTime aReceivedDT = aInboundTx.getAS4Timestamp ();
-            final Duration aForwardingDuration = aReceivedDT != null ? Duration.between (aReceivedDT,
-                                                                                         aTimestampMgr.getCurrentDateTimeUTC ())
-                                                                     : null;
-            final boolean bIsRetry = aInboundTx.getAttemptCount () > 0;
-            for (final var aHandler : APCoreMetaManager.getAllLifecycleHandlers ())
-            {
-              aHandler.onInboundDocumentForwarded (aInboundTx.getID (),
-                                                   aInboundTx.getSbdhInstanceID (),
-                                                   aForwardingDuration,
-                                                   bIsRetry,
-                                                   aInboundTx.getVerificationResult ());
+              CircuitBreakerManager.recordFailure (sCircuitBreakerID);
+              bResultRecorded = true;
+              return ESuccess.FAILURE;
             }
 
-            bForwardSuccess = true;
+            // Set status
+            aTxMgr.updateStatus (aInboundTx.getID (), EInboundStatus.FORWARDING);
 
-            // Determine C4 country code: either from sync response or via configured resolution
-            // modes
-            String sC4CountryCode = aResult.getCountryCodeC4 ();
-            if (sC4CountryCode == null)
+            // Actual forwarding
+            ForwardingResult aResult;
+            try
             {
-              sC4CountryCode = Telemetry.withSpan (CPhossAPOtel.SPAN_INBOUND_C4_RESOLVE,
-                                                   ETelemetrySpanKind.INTERNAL,
-                                                   aResolveSpan -> {
-                                                     aResolveSpan.setAttribute (CPhossAPOtel.ATTR_TRANSACTION_ID,
-                                                                                aInboundTx.getID ())
-                                                                 .setAttribute (CPhossAPOtel.ATTR_RECEIVER_ID,
-                                                                                aInboundTx.getReceiverID ());
-                                                     return C4CountryCodeResolver.resolve (aInboundTx);
-                                                   });
+              aResult = aForwarder.forwardDocument (ForwardableDocument.fromInbound (aInboundTx));
             }
-
-            if (sC4CountryCode != null)
+            catch (final Exception ex)
             {
-              // We can store the reporting item immediately
-              aTxMgr.updateC4CountryCode (aInboundTx.getID (), sC4CountryCode);
-              if (APPeppolReportingHelper.createInboundPeppolReportingItem (aInboundTx.getID ()).isFailure ())
+              // Be resilient...
+              aResult = ForwardingResult.failure ("forward_exception",
+                                                  "Internal error forwarding the document: " +
+                                                                       ex.getMessage () +
+                                                                       " (" +
+                                                                       ex.getClass ().getName () +
+                                                                       ")");
+
+              for (final var aHandler : APCoreMetaManager.getAllNotificationHandlers ())
               {
-                LOGGER.error (sLogPrefix +
-                              "Forwarding successful, but failed to store Peppol Reporting entry for '" +
-                              aInboundTx.getID () +
-                              "'");
+                aHandler.onUnexpectedException ("InboundOrchestrator.forwardDocument",
+                                                "Internal error forwarding document for transaction '" +
+                                                                                       aInboundTx.getID () +
+                                                                                       "'",
+                                                ex);
               }
+            }
+
+            if (aResult.isSuccess ())
+            {
+              // Forwarding worked
+              CircuitBreakerManager.recordSuccess (sCircuitBreakerID);
+              bResultRecorded = true;
+              aAttemptMgr.createSuccess (aInboundTx.getID ());
+
+              aTxMgr.updateStatusCompleted (aInboundTx.getID (), EInboundStatus.FORWARDED);
+              LOGGER.info (sLogPrefix + "Forwarding successful for transaction '" + aInboundTx.getID () + "'");
+
+              final OffsetDateTime aReceivedDT = aInboundTx.getAS4Timestamp ();
+              final Duration aForwardingDuration = aReceivedDT != null ? Duration.between (aReceivedDT,
+                                                                                           aTimestampMgr.getCurrentDateTimeUTC ())
+                                                                       : null;
+              final boolean bIsRetry = aInboundTx.getAttemptCount () > 0;
+              for (final var aHandler : APCoreMetaManager.getAllLifecycleHandlers ())
+              {
+                aHandler.onInboundDocumentForwarded (aInboundTx.getID (),
+                                                     aInboundTx.getSbdhInstanceID (),
+                                                     aForwardingDuration,
+                                                     bIsRetry,
+                                                     aInboundTx.getVerificationResult ());
+              }
+
+              bForwardSuccess = true;
+
+              // Determine C4 country code: either from sync response or via configured resolution
+              // modes
+              String sC4CountryCode = aResult.getCountryCodeC4 ();
+              if (sC4CountryCode == null)
+              {
+                sC4CountryCode = Telemetry.withSpan (CPhossAPOtel.SPAN_INBOUND_C4_RESOLVE,
+                                                     ETelemetrySpanKind.INTERNAL,
+                                                     aResolveSpan -> {
+                                                       aResolveSpan.setAttribute (CPhossAPOtel.ATTR_TRANSACTION_ID,
+                                                                                  aInboundTx.getID ())
+                                                                   .setAttribute (CPhossAPOtel.ATTR_RECEIVER_ID,
+                                                                                  aInboundTx.getReceiverID ());
+                                                       return C4CountryCodeResolver.resolve (aInboundTx);
+                                                     });
+              }
+
+              if (sC4CountryCode != null)
+              {
+                // We can store the reporting item immediately
+                aTxMgr.updateC4CountryCode (aInboundTx.getID (), sC4CountryCode);
+                if (APPeppolReportingHelper.createInboundPeppolReportingItem (aInboundTx.getID ()).isFailure ())
+                {
+                  LOGGER.error (sLogPrefix +
+                                "Forwarding successful, but failed to store Peppol Reporting entry for '" +
+                                aInboundTx.getID () +
+                                "'");
+                }
+              }
+              else
+                if (APPeppolReportingHelper.isExcludedFromReporting (aInboundTx.getSenderID (),
+                                                                     aInboundTx.getReceiverID ()))
+                {
+                  // A transaction that is not counted anyway needs no C4 country code - close the
+                  // reporting status, so that it is neither queried via the API nor blocks the
+                  // archival
+                  APPeppolReportingHelper.createInboundPeppolReportingItem (aInboundTx.getID ());
+                }
+
+              // Fire-and-forget dispatch to all configured secondary forwarders. Failures are logged
+              // only - no retry, no SLA, no effect on the inbound transaction status.
+              _dispatchFireAndForget (sLogPrefix,
+                                      aInboundTx,
+                                      APCoreMetaManager.getAllSecondaryForwarders (),
+                                      "forward-secondary",
+                                      CPhossAPOtel.SPAN_INBOUND_FORWARD_SECONDARY,
+                                      "Secondary forwarding");
+
+              return ESuccess.SUCCESS;
+            }
+
+            // Forwarding failed
+            CircuitBreakerManager.recordFailure (sCircuitBreakerID);
+            bResultRecorded = true;
+            aAttemptMgr.createFailure (aInboundTx.getID (), aResult.getErrorCode (), aResult.getErrorDetails ());
+
+            final int nNewAttemptCount = aInboundTx.getAttemptCount () + 1;
+            final int nMaxRetryAttempts = APCoreConfig.getRetryForwardingMaxAttempts ();
+            if (!aResult.isRetryAllowed () || nNewAttemptCount >= nMaxRetryAttempts)
+            {
+              // Maximum number of retries are exhausted - we go on "permanently
+              // failed"
+              final String sFailureReason = aResult.isRetryAllowed () ? "Max retries (" +
+                                                                        nMaxRetryAttempts +
+                                                                        ") exhausted: " +
+                                                                        aResult.getErrorDetails ()
+                                                                      : "Retry disallowed by receiver: " +
+                                                                        aResult.getErrorDetails ();
+              aTxMgr.updateStatusAndRetry (aInboundTx.getID (),
+                                           EInboundStatus.PERMANENTLY_FAILED,
+                                           nNewAttemptCount,
+                                           null,
+                                           sFailureReason);
+
+              _handlePermanentForwardingFailure (aInboundTx,
+                                                 aResult.isRetryAllowed () ? "Max retries exhausted"
+                                                                           : "Retry disallowed by receiver");
             }
             else
-              if (APPeppolReportingHelper.isExcludedFromReporting (aInboundTx.getSenderID (),
-                                                                   aInboundTx.getReceiverID ()))
-              {
-                // A transaction that is not counted anyway needs no C4 country code - close the
-                // reporting status, so that it is neither queried via the API nor blocks the
-                // archival
-                APPeppolReportingHelper.createInboundPeppolReportingItem (aInboundTx.getID ());
-              }
-
-            // Fire-and-forget dispatch to all configured secondary forwarders. Failures are logged
-            // only - no retry, no SLA, no effect on the inbound transaction status.
-            _dispatchFireAndForget (sLogPrefix,
-                                    aInboundTx,
-                                    APCoreMetaManager.getAllSecondaryForwarders (),
-                                    "forward-secondary",
-                                    CPhossAPOtel.SPAN_INBOUND_FORWARD_SECONDARY,
-                                    "Secondary forwarding");
-
-            return ESuccess.SUCCESS;
+            {
+              // Calculate the next retry and remember it
+              final var aNextRetry = BackoffCalculator.calculateNextRetry (nNewAttemptCount,
+                                                                           APCoreConfig.getRetryForwardingInitialBackoff (),
+                                                                           APCoreConfig.getRetryForwardingBackoffMultiplier (),
+                                                                           APCoreConfig.getRetryForwardingMaxBackoff ());
+              aTxMgr.updateStatusAndRetry (aInboundTx.getID (),
+                                           EInboundStatus.FORWARD_FAILED,
+                                           nNewAttemptCount,
+                                           aNextRetry,
+                                           aResult.getErrorDetails ());
+            }
           }
-
-          // Forwarding failed
-          CircuitBreakerManager.recordFailure (sCircuitBreakerID);
-          aAttemptMgr.createFailure (aInboundTx.getID (), aResult.getErrorCode (), aResult.getErrorDetails ());
-
-          final int nNewAttemptCount = aInboundTx.getAttemptCount () + 1;
-          final int nMaxRetryAttempts = APCoreConfig.getRetryForwardingMaxAttempts ();
-          if (!aResult.isRetryAllowed () || nNewAttemptCount >= nMaxRetryAttempts)
+          finally
           {
-            // Maximum number of retries are exhausted - we go on "permanently
-            // failed"
-            final String sFailureReason = aResult.isRetryAllowed () ? "Max retries (" +
-                                                                      nMaxRetryAttempts +
-                                                                      ") exhausted: " +
-                                                                      aResult.getErrorDetails ()
-                                                                    : "Retry disallowed by receiver: " +
-                                                                      aResult.getErrorDetails ();
-            aTxMgr.updateStatusAndRetry (aInboundTx.getID (),
-                                         EInboundStatus.PERMANENTLY_FAILED,
-                                         nNewAttemptCount,
-                                         null,
-                                         sFailureReason);
-
-            _handlePermanentForwardingFailure (aInboundTx,
-                                               aResult.isRetryAllowed () ? "Max retries exhausted"
-                                                                         : "Retry disallowed by receiver");
-          }
-          else
-          {
-            // Calculate the next retry and remember it
-            final var aNextRetry = BackoffCalculator.calculateNextRetry (nNewAttemptCount,
-                                                                         APCoreConfig.getRetryForwardingInitialBackoff (),
-                                                                         APCoreConfig.getRetryForwardingBackoffMultiplier (),
-                                                                         APCoreConfig.getRetryForwardingMaxBackoff ());
-            aTxMgr.updateStatusAndRetry (aInboundTx.getID (),
-                                         EInboundStatus.FORWARD_FAILED,
-                                         nNewAttemptCount,
-                                         aNextRetry,
-                                         aResult.getErrorDetails ());
+            // Unexpected RuntimeException - the permit must not be leaked
+            if (!bResultRecorded)
+              CircuitBreakerManager.recordFailure (sCircuitBreakerID);
           }
         }
         else

@@ -23,6 +23,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.helger.annotation.concurrent.ThreadSafe;
+import com.helger.annotation.style.VisibleForTesting;
 
 import dev.failsafe.CircuitBreaker;
 
@@ -91,5 +92,15 @@ public final class CircuitBreakerManager
   public static void recordFailure (@NonNull final String sCircuitKey)
   {
     _getOrCreate (sCircuitKey).recordFailure ();
+  }
+
+  /**
+   * Remove all known circuit breakers, so that the next usage of a key creates a new circuit
+   * breaker from the current configuration. Only intended for testing.
+   */
+  @VisibleForTesting
+  public static void removeAll ()
+  {
+    BREAKERS.clear ();
   }
 }
