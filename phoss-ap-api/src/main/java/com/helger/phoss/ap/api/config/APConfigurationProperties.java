@@ -59,6 +59,23 @@ public final class APConfigurationProperties
   public static final String PEPPOL_SMP_CACHE_MAX_SIZE = "peppol.smp.cache.max-size";
   /** @since 0.11.0 */
   public static final int PEPPOL_SMP_CACHE_MAX_SIZE_DEFAULT = 1_000;
+  /**
+   * The connect timeout for all SMP queries. The default equals the previously hardcoded value.
+   *
+   * @since 0.13.0
+   */
+  public static final String PEPPOL_SMP_TIMEOUT_CONNECT = "peppol.smp.timeout.connect";
+  /** @since 0.13.0 */
+  public static final Duration PEPPOL_SMP_TIMEOUT_CONNECT_DEFAULT = Duration.ofSeconds (5);
+  /**
+   * The response (read) timeout for all SMP queries. The default equals the previously hardcoded
+   * value.
+   *
+   * @since 0.13.0
+   */
+  public static final String PEPPOL_SMP_TIMEOUT_RESPONSE = "peppol.smp.timeout.response";
+  /** @since 0.13.0 */
+  public static final Duration PEPPOL_SMP_TIMEOUT_RESPONSE_DEFAULT = Duration.ofSeconds (10);
 
   // AS4 endpoint
   public static final String PHASE4_ENDPOINT_ADDRESS = "phase4.endpoint.address";
@@ -331,6 +348,45 @@ public final class APConfigurationProperties
   public static final String CIRCUIT_BREAKER_DEFER_MAX_DURATION = "circuit-breaker.defer-max-duration";
   /** @since 0.13.0 */
   public static final Duration CIRCUIT_BREAKER_DEFER_MAX_DURATION_DEFAULT = Duration.ofHours (12);
+  /**
+   * The number of executions the failure threshold is measured over. If neither this nor
+   * {@link #CIRCUIT_BREAKER_FAILURE_PERIOD} is set, the circuit breaker opens after
+   * {@link #CIRCUIT_BREAKER_FAILURE_THRESHOLD} <b>consecutive</b> failures - the default. Must be
+   * &gt;= the failure threshold, otherwise the value is ignored.
+   * <p>
+   * Together with {@link #CIRCUIT_BREAKER_FAILURE_RATE} this is the minimum number of executions
+   * before the failure rate is evaluated at all.
+   * </p>
+   *
+   * @since 0.13.0
+   */
+  public static final String CIRCUIT_BREAKER_FAILURE_EXECUTIONS = "circuit-breaker.failure-executions";
+  /** @since 0.13.0 */
+  public static final int CIRCUIT_BREAKER_FAILURE_EXECUTIONS_DEFAULT = 0;
+  /**
+   * The rolling time window the failure threshold is measured over. Only the executions inside
+   * that window are counted.
+   * <p>
+   * <b>Note:</b> without {@link #CIRCUIT_BREAKER_FAILURE_RATE} this makes the circuit breaker
+   * <b>more</b> sensitive, not less: the failures inside the window no longer have to be
+   * consecutive. To tolerate isolated failures during short load peaks, set the failure rate as
+   * well.
+   * </p>
+   *
+   * @since 0.13.0
+   */
+  public static final String CIRCUIT_BREAKER_FAILURE_PERIOD = "circuit-breaker.failure-period";
+  /**
+   * The failure rate in percent (1-100) at which the circuit breaker opens. Only used together
+   * with {@link #CIRCUIT_BREAKER_FAILURE_PERIOD}; it replaces the absolute failure threshold. This
+   * is the setting that tolerates isolated failures during short load peaks on an otherwise
+   * healthy SMP or AP.
+   *
+   * @since 0.13.0
+   */
+  public static final String CIRCUIT_BREAKER_FAILURE_RATE = "circuit-breaker.failure-rate";
+  /** @since 0.13.0 */
+  public static final int CIRCUIT_BREAKER_FAILURE_RATE_DEFAULT = 0;
 
   // Verification
   public static final String VERIFICATION_OUTBOUND_ENABLED = "verification.outbound.enabled";

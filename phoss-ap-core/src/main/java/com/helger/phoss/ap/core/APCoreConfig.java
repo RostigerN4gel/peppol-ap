@@ -96,6 +96,24 @@ public final class APCoreConfig
   }
 
   /**
+   * Resolve an optional duration-typed configuration value.
+   *
+   * @param sDurationKey
+   *        The duration-grammar configuration key.
+   * @return <code>null</code> if the key is not configured or cannot be parsed.
+   * @since 0.13.0
+   */
+  @Nullable
+  private static Duration _getDurationOrNull (@NonNull final String sDurationKey)
+  {
+    return _getConfig ().getAsConfigDuration (sDurationKey,
+                                              sErr -> LOGGER.warn ("Failed to parse configuration key '" +
+                                                                   sDurationKey +
+                                                                   "' as duration: " +
+                                                                   sErr));
+  }
+
+  /**
    * Resolve a duration-typed configuration value, preferring the duration-grammar key over the
    * legacy millisecond-typed key. The duration-grammar key accepts compound expressions like
    * <code>10s</code>, <code>5m</code>, <code>2d 5h 30m</code>. If the duration key is missing,
@@ -303,6 +321,28 @@ public final class APCoreConfig
   {
     return _getConfig ().getAsInt (APConfigurationProperties.PEPPOL_SMP_CACHE_MAX_SIZE,
                                    APConfigurationProperties.PEPPOL_SMP_CACHE_MAX_SIZE_DEFAULT);
+  }
+
+  /**
+   * @return The connect timeout for all SMP queries. Never <code>null</code>.
+   * @since 0.13.0
+   */
+  @NonNull
+  public static Duration getPeppolSmpTimeoutConnect ()
+  {
+    return _getDuration (APConfigurationProperties.PEPPOL_SMP_TIMEOUT_CONNECT,
+                         APConfigurationProperties.PEPPOL_SMP_TIMEOUT_CONNECT_DEFAULT);
+  }
+
+  /**
+   * @return The response (read) timeout for all SMP queries. Never <code>null</code>.
+   * @since 0.13.0
+   */
+  @NonNull
+  public static Duration getPeppolSmpTimeoutResponse ()
+  {
+    return _getDuration (APConfigurationProperties.PEPPOL_SMP_TIMEOUT_RESPONSE,
+                         APConfigurationProperties.PEPPOL_SMP_TIMEOUT_RESPONSE_DEFAULT);
   }
 
   /**
@@ -580,6 +620,41 @@ public final class APCoreConfig
   {
     return _getDuration (APConfigurationProperties.CIRCUIT_BREAKER_DEFER_MAX_DURATION,
                          APConfigurationProperties.CIRCUIT_BREAKER_DEFER_MAX_DURATION_DEFAULT);
+  }
+
+  /**
+   * @return The number of executions the circuit breaker failure threshold is measured over.
+   *         {@code 0} means the failures must be consecutive.
+   * @since 0.13.0
+   */
+  @Nonnegative
+  public static int getCircuitBreakerFailureExecutions ()
+  {
+    return _getConfig ().getAsInt (APConfigurationProperties.CIRCUIT_BREAKER_FAILURE_EXECUTIONS,
+                                   APConfigurationProperties.CIRCUIT_BREAKER_FAILURE_EXECUTIONS_DEFAULT);
+  }
+
+  /**
+   * @return The rolling time window the circuit breaker failure threshold is measured over. May be
+   *         <code>null</code>, meaning that no time based thresholding is used.
+   * @since 0.13.0
+   */
+  @Nullable
+  public static Duration getCircuitBreakerFailurePeriod ()
+  {
+    return _getDurationOrNull (APConfigurationProperties.CIRCUIT_BREAKER_FAILURE_PERIOD);
+  }
+
+  /**
+   * @return The failure rate in percent at which the circuit breaker opens. {@code 0} means that
+   *         the absolute failure threshold is used instead.
+   * @since 0.13.0
+   */
+  @Nonnegative
+  public static int getCircuitBreakerFailureRate ()
+  {
+    return _getConfig ().getAsInt (APConfigurationProperties.CIRCUIT_BREAKER_FAILURE_RATE,
+                                   APConfigurationProperties.CIRCUIT_BREAKER_FAILURE_RATE_DEFAULT);
   }
 
   /**

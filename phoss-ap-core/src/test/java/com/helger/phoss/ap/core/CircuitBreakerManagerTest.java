@@ -85,6 +85,9 @@ public final class CircuitBreakerManagerTest
     _setSystemProperty (APConfigurationProperties.CIRCUIT_BREAKER_FAILURE_THRESHOLD, null);
     _setSystemProperty (APConfigurationProperties.CIRCUIT_BREAKER_OPEN_DURATION, null);
     _setSystemProperty (APConfigurationProperties.CIRCUIT_BREAKER_HALF_OPEN_MAX_ATTEMPTS, null);
+    _setSystemProperty (APConfigurationProperties.CIRCUIT_BREAKER_FAILURE_EXECUTIONS, null);
+    _setSystemProperty (APConfigurationProperties.CIRCUIT_BREAKER_FAILURE_PERIOD, null);
+    _setSystemProperty (APConfigurationProperties.CIRCUIT_BREAKER_FAILURE_RATE, null);
     APConfigProvider.setConfig (m_aOldConfig);
   }
 
@@ -149,6 +152,91 @@ public final class CircuitBreakerManagerTest
     CircuitBreakerManager.recordSuccess (KEY);
     assertTrue (CircuitBreakerManager.tryAcquirePermit (KEY));
     CircuitBreakerManager.recordSuccess (KEY);
+  }
+
+  @Test
+  public void testFailureRateThresholdToleratesIsolatedFailures ()
+  {
+    // Open only if at least half of the last 4+ executions within 10 minutes failed
+    _setSystemProperty (APConfigurationProperties.CIRCUIT_BREAKER_FAILURE_RATE, "50");
+    _setSystemProperty (APConfigurationProperties.CIRCUIT_BREAKER_FAILURE_EXECUTIONS, "4");
+    _setSystemProperty (APConfigurationProperties.CIRCUIT_BREAKER_FAILURE_PERIOD, "10m");
+    APConfigProvider.setConfig (new ConfigWithFallback (ConfigFactory.createDefaultValueProvider ()));
+    CircuitBreakerManager.removeAll ();
+
+    // 2 failures out of 10 executions is a rate of 20% - a short load peak on a healthy SMP
+    for (int i = 0; i < 10; ++i)
+    {
+      assertTrue ("Permit " + i + " was not granted", CircuitBreakerManager.tryAcquirePermit (KEY));
+      if (i % 5 == 0)
+        CircuitBreakerManager.recordFailure (KEY);
+      else
+        CircuitBreakerManager.recordSuccess (KEY);
+    }
+    assertTrue ("Isolated failures must not open the circuit breaker",
+                CircuitBreakerManager.tryAcquirePermit (KEY));
+    CircuitBreakerManager.recordSuccess (KEY);
+  }
+
+  @Test
+  public void testFailureRateThresholdStillOpensOnRealOutages ()
+  {
+    _setSystemProperty (APConfigurationProperties.CIRCUIT_BREAKER_FAILURE_RATE, "50");
+    _setSystemProperty (APConfigurationProperties.CIRCUIT_BREAKER_FAILURE_EXECUTIONS, "4");
+    _setSystemProperty (APConfigurationProperties.CIRCUIT_BREAKER_FAILURE_PERIOD, "10m");
+    APConfigProvider.setConfig (new ConfigWithFallback (ConfigFactory.createDefaultValueProvider ()));
+    CircuitBreakerManager.removeAll ();
+
+    // 4 executions, all of them failures - a rate of 100%
+    for (int i = 0; i < 4; ++i)
+    {
+      assertTrue (CircuitBreakerManager.tryAcquirePermit (KEY));
+      CircuitBreakerManager.recordFailure (KEY);
+    }
+    assertFalse (CircuitBreakerManager.tryAcquirePermit (KEY));
+  }
+
+  @Test
+  public void testTimeBasedFailureCountIsNotLimitedToConsecutiveFailures ()
+  {
+    // Without a rate, the failures inside the window do not have to be consecutive anymore - this
+    // makes the circuit breaker more sensitive, not less
+    _setSystemProperty (APConfigurationProperties.CIRCUIT_BREAKER_FAILURE_THRESHOLD, "2");
+    _setSystemProperty (APConfigurationProperties.CIRCUIT_BREAKER_FAILURE_EXECUTIONS, "4");
+    _setSystemProperty (APConfigurationProperties.CIRCUIT_BREAKER_FAILURE_PERIOD, "10m");
+    APConfigProvider.setConfig (new ConfigWithFallback (ConfigFactory.createDefaultValueProvider ()));
+    CircuitBreakerManager.removeAll ();
+
+    // failure, success, success, failure - never two in a row
+    final boolean [] aFailures = { true, false, false, true };
+    for (final boolean bFailure : aFailures)
+    {
+      assertTrue (CircuitBreakerManager.tryAcquirePermit (KEY));
+      if (bFailure)
+        CircuitBreakerManager.recordFailure (KEY);
+      else
+        CircuitBreakerManager.recordSuccess (KEY);
+    }
+    assertFalse (CircuitBreakerManager.tryAcquirePermit (KEY));
+  }
+
+  @Test
+  public void testInvalidTimeBasedThresholdingFallsBackToConsecutiveFailures ()
+  {
+    // failure-executions smaller than failure-threshold is rejected by Failsafe - the circuit
+    // breaker must still be created
+    _setSystemProperty (APConfigurationProperties.CIRCUIT_BREAKER_FAILURE_THRESHOLD, "5");
+    _setSystemProperty (APConfigurationProperties.CIRCUIT_BREAKER_FAILURE_EXECUTIONS, "2");
+    APConfigProvider.setConfig (new ConfigWithFallback (ConfigFactory.createDefaultValueProvider ()));
+    CircuitBreakerManager.removeAll ();
+
+    // 5 consecutive failures - the documented default behaviour
+    for (int i = 0; i < 5; ++i)
+    {
+      assertTrue (CircuitBreakerManager.tryAcquirePermit (KEY));
+      CircuitBreakerManager.recordFailure (KEY);
+    }
+    assertFalse (CircuitBreakerManager.tryAcquirePermit (KEY));
   }
 
   @Test
