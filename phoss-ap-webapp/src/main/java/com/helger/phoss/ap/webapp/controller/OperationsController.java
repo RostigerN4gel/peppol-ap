@@ -35,11 +35,13 @@ import com.helger.base.state.ESuccess;
 import com.helger.phoss.ap.api.IInboundTransactionManager;
 import com.helger.phoss.ap.api.IOutboundTransactionManager;
 import com.helger.phoss.ap.api.codelist.EInboundStatus;
+import com.helger.phoss.ap.api.dto.CircuitBreakerResponse;
 import com.helger.phoss.ap.api.dto.InboundTransactionResponse;
 import com.helger.phoss.ap.api.dto.OutboundTransactionResponse;
 import com.helger.phoss.ap.api.model.IInboundTransaction;
 import com.helger.phoss.ap.api.model.IOutboundTransaction;
 import com.helger.phoss.ap.basic.APBasicMetaManager;
+import com.helger.phoss.ap.core.CircuitBreakerManager;
 import com.helger.phoss.ap.core.inbound.InboundOrchestrator;
 import com.helger.phoss.ap.db.APJdbcMetaManager;
 import com.helger.phoss.ap.webapp.config.OpenApiConfig;
@@ -291,5 +293,45 @@ public class OperationsController
       LOGGER.error ("Failed to read payload for outbound transaction " + sbdhInstanceID, ex);
       return ResponseEntity.notFound ().build ();
     }
+  }
+
+  /**
+   * List all known circuit breakers and their current state.
+   *
+   * @return The list of all circuit breakers that were used at least once.
+   * @since 0.13.0
+   */
+  @GetMapping ("/circuit-breakers")
+  @Operation (summary = "List all circuit breakers",
+              description = "Returns the current state of every circuit breaker that was used at least once - which remote system is guarded, whether it is currently suspended, since when, for how much longer, how many failures were counted and what the last failure was.")
+  @ApiResponses ({ @ApiResponse (responseCode = "200", description = "List of circuit breakers") })
+  public ResponseEntity <List <CircuitBreakerResponse>> getAllCircuitBreakers ()
+  {
+    final var aInfos = CircuitBreakerManager.getAllInfos ();
+    return ResponseEntity.ok (new ArrayList <> (aInfos.getAllMapped (CircuitBreakerResponse::fromDomain)));
+  }
+
+  /**
+   * Reset a single circuit breaker, so that the guarded remote system is contacted again
+   * immediately.
+   *
+   * @param circuitKey
+   *        The key of the circuit breaker to reset.
+   * @return 200 on success, 404 if no circuit breaker with that key is known.
+   * @since 0.13.0
+   */
+  @PostMapping ("/circuit-breakers/{circuitKey}/reset")
+  @Operation (summary = "Reset a circuit breaker",
+              description = "Forgets the circuit breaker with the provided key, so that the next call creates a new, closed one from the current configuration. Use this if a suspended SMP or AP is known to be healthy again and the remaining open duration should not be waited out.")
+  @ApiResponses ({ @ApiResponse (responseCode = "200", description = "Circuit breaker was reset"),
+                   @ApiResponse (responseCode = "404", description = "Circuit breaker not found", content = @Content) })
+  public ResponseEntity <Void> resetCircuitBreaker (@Parameter (description = "Circuit breaker key, e.g. 'smp$https://smp.example.org'",
+                                                                required = true) @PathVariable ("circuitKey") final String circuitKey)
+  {
+    if (!CircuitBreakerManager.reset (circuitKey))
+      return ResponseEntity.notFound ().build ();
+
+    LOGGER.info ("The circuit breaker '" + circuitKey + "' was reset via the Operations API");
+    return ResponseEntity.ok ().build ();
   }
 }

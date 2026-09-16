@@ -175,8 +175,8 @@ public class DocumentSender
    *         in case of error
    */
   @NonNull
-  public SendResult sendPrebuiltSbd (@NonNull final Path aSbdFile, @NonNull final String sSbdhInstanceID)
-                                                                                                          throws IOException
+  public SendResult sendPrebuiltSbd (@NonNull final Path aSbdFile,
+                                     @NonNull final String sSbdhInstanceID) throws IOException
   {
     final String sUrl = m_sBaseUrl + "/api/outbound/submit-sbd";
     String sBody = Files.readString (aSbdFile, StandardCharsets.UTF_8);

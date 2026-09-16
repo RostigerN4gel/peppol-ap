@@ -56,6 +56,10 @@ public final class CPhossAPOtel
   public static final String METRIC_OUTBOUND_SENDING_PERMANENT_FAILURES = "phoss.ap.outbound.sending.permanent_failures";
   public static final String METRIC_REPORTING_FAILURES = "phoss.ap.reporting.failures";
   public static final String METRIC_UNEXPECTED_EXCEPTIONS = "phoss.ap.unexpected_exceptions";
+  /** @since 0.13.0 */
+  public static final String METRIC_CIRCUIT_BREAKER_REJECTIONS = "phoss.ap.circuit_breaker.rejections";
+  /** @since 0.13.0 */
+  public static final String METRIC_CIRCUIT_BREAKER_STATE_CHANGES = "phoss.ap.circuit_breaker.state_changes";
 
   // === Lifecycle counters ===
   public static final String METRIC_INBOUND_RECEIVED = "phoss.ap.inbound.received";
@@ -144,6 +148,10 @@ public final class CPhossAPOtel
   public static final String ATTR_SMP_URL = "phoss.ap.smp.url";
   public static final String ATTR_EXCEPTION_CONTEXT = "phoss.ap.exception.context";
   public static final String ATTR_EXCEPTION_CLASS = "phoss.ap.exception.class";
+  /** @since 0.13.0 */
+  public static final String ATTR_CIRCUIT_BREAKER_KEY = "phoss.ap.circuit_breaker.key";
+  /** @since 0.13.0 */
+  public static final String ATTR_CIRCUIT_BREAKER_STATE = "phoss.ap.circuit_breaker.state";
 
   private CPhossAPOtel ()
   {}

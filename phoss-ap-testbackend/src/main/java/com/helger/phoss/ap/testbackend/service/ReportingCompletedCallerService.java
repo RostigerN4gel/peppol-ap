@@ -63,8 +63,7 @@ public class ReportingCompletedCallerService
    *         If the HTTP request is interrupted.
    */
   public Map <String, String> sendCountryC4Back (@NonNull final String sSbdhInstanceID,
-                                                 @Nullable final String sC4CountryCode) throws IOException,
-                                                                                        InterruptedException
+                                                 @Nullable final String sC4CountryCode) throws IOException, InterruptedException
   {
     final String sCountryCode = sC4CountryCode != null ? sC4CountryCode : m_sDefaultCountryCode;
 

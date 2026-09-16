@@ -131,8 +131,7 @@ public final class APPeppolReportingHelperTest
       assertTrue (APPeppolReportingHelper.isExcludedFromReporting ("iso6523-actorid-upis::9915:TEST",
                                                                    aOther.getURIEncoded ()));
       // Neither side matches
-      assertFalse (APPeppolReportingHelper.isExcludedFromReporting (aOther.getURIEncoded (),
-                                                                    aOther.getURIEncoded ()));
+      assertFalse (APPeppolReportingHelper.isExcludedFromReporting (aOther.getURIEncoded (), aOther.getURIEncoded ()));
       assertFalse (APPeppolReportingHelper.isExcludedFromReporting (null, null));
       // Different scheme, same value
       assertFalse (APPeppolReportingHelper.isExcludedFromReporting ("iso6523-actorid-upis::9916:test",
