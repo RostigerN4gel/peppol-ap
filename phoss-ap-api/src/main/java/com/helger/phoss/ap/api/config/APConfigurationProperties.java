@@ -419,9 +419,8 @@ public final class APConfigurationProperties
   public static final int PEPPOL_REPORTING_SCHEDULE_MINUTE_DEFAULT = 7;
   /**
    * Comma separated list of participant identifiers that are excluded from Peppol Reporting. Each
-   * entry may either be URI encoded (like
-   * <code>iso6523-actorid-upis::9915:test</code>) or use the default participant identifier scheme
-   * only (like <code>9915:test</code>).
+   * entry may either be URI encoded (like <code>iso6523-actorid-upis::9915:test</code>) or use the
+   * default participant identifier scheme only (like <code>9915:test</code>).
    *
    * @since 0.13.0
    */

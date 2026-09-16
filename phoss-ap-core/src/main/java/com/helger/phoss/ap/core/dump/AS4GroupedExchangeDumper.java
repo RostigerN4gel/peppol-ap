@@ -113,8 +113,8 @@ public class AS4GroupedExchangeDumper implements IAS4IncomingDumper, IAS4Outgoin
   }
 
   @Nullable
-  private static OutputStream _openAndWriteHeaders (@NonNull final File aFile, @Nullable final HttpHeaderMap aHeaders)
-                                                                                                                       throws IOException
+  private static OutputStream _openAndWriteHeaders (@NonNull final File aFile,
+                                                    @Nullable final HttpHeaderMap aHeaders) throws IOException
   {
     final OutputStream aOS = FileHelper.getBufferedOutputStream (aFile);
     if (aOS == null)

@@ -77,8 +77,7 @@ public final class APPeppolReportingHelper
    * @return <code>true</code> if the transaction must not be counted for Peppol Reporting.
    * @since 0.13.0
    */
-  public static boolean isExcludedFromReporting (@Nullable final String sSenderID,
-                                                 @Nullable final String sReceiverID)
+  public static boolean isExcludedFromReporting (@Nullable final String sSenderID, @Nullable final String sReceiverID)
   {
     final ICommonsList <IParticipantIdentifier> aExcludedPIDs = getAllExcludedParticipantIDs ();
     if (aExcludedPIDs.isEmpty ())
