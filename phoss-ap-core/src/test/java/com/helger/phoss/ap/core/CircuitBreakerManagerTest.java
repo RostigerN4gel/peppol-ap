@@ -37,9 +37,9 @@ import com.helger.config.fallback.ConfigWithFallback;
 import com.helger.config.fallback.IConfigWithFallback;
 import com.helger.datetime.helper.PDTFactory;
 import com.helger.phoss.ap.api.codelist.ECircuitBreakerState;
-import com.helger.phoss.ap.api.model.CircuitBreakerInfo;
 import com.helger.phoss.ap.api.config.APConfigProvider;
 import com.helger.phoss.ap.api.config.APConfigurationProperties;
+import com.helger.phoss.ap.api.model.CircuitBreakerInfo;
 
 /**
  * Test class for class {@link CircuitBreakerManager}.
@@ -184,8 +184,7 @@ public final class CircuitBreakerManagerTest
       else
         CircuitBreakerManager.recordSuccess (KEY);
     }
-    assertTrue ("Isolated failures must not open the circuit breaker",
-                CircuitBreakerManager.tryAcquirePermit (KEY));
+    assertTrue ("Isolated failures must not open the circuit breaker", CircuitBreakerManager.tryAcquirePermit (KEY));
     CircuitBreakerManager.recordSuccess (KEY);
   }
 
@@ -266,8 +265,7 @@ public final class CircuitBreakerManagerTest
     }
     assertFalse (CircuitBreakerManager.tryAcquirePermit (KEY));
 
-    final String sMsg = CircuitBreakerManager.getRejectionMessage (KEY,
-                                                                   "SMP access to 'https://smp.example.org'");
+    final String sMsg = CircuitBreakerManager.getRejectionMessage (KEY, "SMP access to 'https://smp.example.org'");
     assertTrue (sMsg, sMsg.startsWith ("SMP access to 'https://smp.example.org' suspended by circuit breaker ("));
     assertTrue (sMsg, sMsg.contains ("state OPEN since "));
     assertTrue (sMsg, sMsg.contains ("s remaining) after "));

@@ -33,8 +33,7 @@ import io.swagger.v3.oas.annotations.media.Schema;
                        "whether it is currently suspended and why.")
 public class CircuitBreakerResponse
 {
-  @Schema (description = "Key that identifies the circuit breaker",
-           example = "smp$https://smp.example.org")
+  @Schema (description = "Key that identifies the circuit breaker", example = "smp$https://smp.example.org")
   private String circuitKey;
 
   @Schema (description = "Current state", allowableValues = { "closed", "open", "half_open" })
