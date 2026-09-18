@@ -36,9 +36,10 @@ import com.helger.config.ConfigFactory;
 import com.helger.config.fallback.ConfigWithFallback;
 import com.helger.config.fallback.IConfigWithFallback;
 import com.helger.datetime.helper.PDTFactory;
-import com.helger.phoss.ap.api.model.CircuitBreakerInfo;
+import com.helger.phoss.ap.api.codelist.ECircuitBreakerState;
 import com.helger.phoss.ap.api.config.APConfigProvider;
 import com.helger.phoss.ap.api.config.APConfigurationProperties;
+import com.helger.phoss.ap.api.model.CircuitBreakerInfo;
 
 /**
  * Test class for class {@link CircuitBreakerManager}.
@@ -183,8 +184,7 @@ public final class CircuitBreakerManagerTest
       else
         CircuitBreakerManager.recordSuccess (KEY);
     }
-    assertTrue ("Isolated failures must not open the circuit breaker",
-                CircuitBreakerManager.tryAcquirePermit (KEY));
+    assertTrue ("Isolated failures must not open the circuit breaker", CircuitBreakerManager.tryAcquirePermit (KEY));
     CircuitBreakerManager.recordSuccess (KEY);
   }
 
@@ -265,8 +265,7 @@ public final class CircuitBreakerManagerTest
     }
     assertFalse (CircuitBreakerManager.tryAcquirePermit (KEY));
 
-    final String sMsg = CircuitBreakerManager.getRejectionMessage (KEY,
-                                                                   "SMP access to 'https://smp.example.org'");
+    final String sMsg = CircuitBreakerManager.getRejectionMessage (KEY, "SMP access to 'https://smp.example.org'");
     assertTrue (sMsg, sMsg.startsWith ("SMP access to 'https://smp.example.org' suspended by circuit breaker ("));
     assertTrue (sMsg, sMsg.contains ("state OPEN since "));
     assertTrue (sMsg, sMsg.contains ("s remaining) after "));
@@ -345,7 +344,7 @@ public final class CircuitBreakerManagerTest
     // Ordered by key - "unittest$closed" before "unittest$com..."
     final CircuitBreakerInfo aClosed = aInfos.get (0);
     assertEquals (sOtherKey, aClosed.circuitKey ());
-    assertEquals ("CLOSED", aClosed.state ());
+    assertEquals (ECircuitBreakerState.CLOSED, aClosed.state ());
     assertFalse (aClosed.isOpen ());
     assertNull (aClosed.openSinceDT ());
     assertEquals (Duration.ZERO, aClosed.remainingDelay ());
@@ -353,7 +352,7 @@ public final class CircuitBreakerManagerTest
 
     final CircuitBreakerInfo aOpen = aInfos.get (1);
     assertEquals (KEY, aOpen.circuitKey ());
-    assertEquals ("OPEN", aOpen.state ());
+    assertEquals (ECircuitBreakerState.OPEN, aOpen.state ());
     assertTrue (aOpen.isOpen ());
     assertNotNull (aOpen.openSinceDT ());
     assertTrue (aOpen.remainingDelay ().toMillis () > 0);
@@ -385,7 +384,7 @@ public final class CircuitBreakerManagerTest
     CircuitBreakerManager.recordSuccess (KEY);
     final var aInfos = CircuitBreakerManager.getAllInfos ();
     assertEquals (1, aInfos.size ());
-    assertEquals ("CLOSED", aInfos.get (0).state ());
+    assertEquals (ECircuitBreakerState.CLOSED, aInfos.get (0).state ());
     assertNull (aInfos.get (0).lastFailureCause ());
   }
 
