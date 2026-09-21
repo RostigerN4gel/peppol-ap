@@ -27,8 +27,8 @@ package com.helger.phoss.ap.core.outbound;
 enum ESmpLookupFailureKind
 {
   /**
-   * The SMP answered, but the receiver participant or the requested service is not registered.
-   * This is a valid answer of a perfectly healthy SMP, so it must not count as an SMP failure.
+   * The SMP answered, but the receiver participant or the requested service is not registered. This
+   * is a valid answer of a perfectly healthy SMP, so it must not count as an SMP failure.
    */
   NEGATIVE_ANSWER,
   /**

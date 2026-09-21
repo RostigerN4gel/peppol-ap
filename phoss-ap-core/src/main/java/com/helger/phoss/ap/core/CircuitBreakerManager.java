@@ -96,10 +96,8 @@ public final class CircuitBreakerManager
       return null;
 
     final String sMessage = aCause.getMessage ();
-    final String sRet = StringHelper.isEmpty (sMessage) ? aCause.getClass ().getSimpleName () : aCause.getClass ()
-                                                                                                      .getSimpleName () +
-                                                                                                ": " +
-                                                                                                sMessage;
+    final String sRet = StringHelper.isEmpty (sMessage) ? aCause.getClass ().getSimpleName ()
+                                                        : aCause.getClass ().getSimpleName () + ": " + sMessage;
     return sRet.length () > MAX_FAILURE_CAUSE_LENGTH ? sRet.substring (0, MAX_FAILURE_CAUSE_LENGTH) + "..." : sRet;
   }
 

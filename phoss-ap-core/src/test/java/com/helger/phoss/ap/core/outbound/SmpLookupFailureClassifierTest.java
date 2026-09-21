@@ -138,7 +138,8 @@ public final class SmpLookupFailureClassifierTest
   {
     final SMPClientException aCause = new SMPClientHttpException (503,
                                                                   "Error thrown with HTTP status code 503",
-                                                                  new HttpResponseException (503, "Service Unavailable"));
+                                                                  new HttpResponseException (503,
+                                                                                             "Service Unavailable"));
     assertEquals (ESmpLookupFailureKind.SMP_UNAVAILABLE, _classify (_wrap (aCause)));
   }
 
@@ -146,7 +147,7 @@ public final class SmpLookupFailureClassifierTest
   public void testInvalidXmlOrSignatureIsSmpUnavailable ()
   {
     final SMPClientException aCause = new SMPClientBadResponseException ("Failed to parse the SMP response",
-                                                                        new IOException ("Malformed XML"));
+                                                                         new IOException ("Malformed XML"));
     assertEquals (ESmpLookupFailureKind.SMP_UNAVAILABLE, _classify (_wrap (aCause)));
   }
 

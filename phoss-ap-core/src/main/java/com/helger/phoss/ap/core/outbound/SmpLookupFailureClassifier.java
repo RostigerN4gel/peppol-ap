@@ -75,8 +75,7 @@ final class SmpLookupFailureClassifier
   {
     if (sMessage == null || !sMessage.startsWith (MSG_PREFIX))
       return false;
-    return sMessage.endsWith (MSG_SUFFIX_NO_SERVICE_METADATA) ||
-           sMessage.endsWith (MSG_SUFFIX_NO_MATCHING_ENDPOINT);
+    return sMessage.endsWith (MSG_SUFFIX_NO_SERVICE_METADATA) || sMessage.endsWith (MSG_SUFFIX_NO_MATCHING_ENDPOINT);
   }
 
   /**

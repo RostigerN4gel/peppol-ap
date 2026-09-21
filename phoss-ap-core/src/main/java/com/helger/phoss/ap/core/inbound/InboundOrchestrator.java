@@ -1447,7 +1447,8 @@ public final class InboundOrchestrator
                   APPeppolReportingHelper.createInboundPeppolReportingItem (aInboundTx.getID ());
                 }
 
-              // Fire-and-forget dispatch to all configured secondary forwarders. Failures are logged
+              // Fire-and-forget dispatch to all configured secondary forwarders. Failures are
+              // logged
               // only - no retry, no SLA, no effect on the inbound transaction status.
               _dispatchFireAndForget (sLogPrefix,
                                       aInboundTx,

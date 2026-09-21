@@ -124,8 +124,8 @@ public final class OutboundOrchestrator
     /** A transient error occurred, the same receiver should be retried later. */
     RETRY,
     /**
-     * The SMP circuit breaker is open, so the SMP was not contacted at all. The transaction must
-     * be retried without consuming a retry attempt.
+     * The SMP circuit breaker is open, so the SMP was not contacted at all. The transaction must be
+     * retried without consuming a retry attempt.
      *
      * @since 0.13.0
      */
@@ -1376,7 +1376,8 @@ public final class OutboundOrchestrator
                   final MessageDigest aMD = HashHelper.createMessageDigest ();
                   try (final ITelemetrySpan aSbdhSpan = Telemetry.startSpan (CPhossAPOtel.SPAN_OUTBOUND_SBDH_READ,
                                                                              ETelemetrySpanKind.INTERNAL)
-                                                                 .setAttribute (CPhossAPOtel.ATTR_TRANSACTION_ID, sTxID))
+                                                                 .setAttribute (CPhossAPOtel.ATTR_TRANSACTION_ID,
+                                                                                sTxID))
                   {
                     boolean bSbdhReadSuccess = false;
                     try
@@ -1432,7 +1433,8 @@ public final class OutboundOrchestrator
                                                                                   .payloadAndMetadata (aSbdData)
                                                                                   // Remaining IDs
                                                                                   .senderPartyID (sC2SeatID)
-                                                                                  // Certificate stuff
+                                                                                  // Certificate
+                                                                                  // stuff
                                                                                   .peppolAP_CAChecker (aAPCAChecker)
                                                                                   .endpointDetailProvider (new AS4EndpointDetailProviderConstant (aReceiverCert,
                                                                                                                                                   sReceiverAPURL,
@@ -1514,7 +1516,9 @@ public final class OutboundOrchestrator
                 aSendingReport.setSendingSuccess (true);
 
                 // Store successful attempt
-                final String sAS4ReceiptID = aSendingReport.getAS4ReceivedSignalMsg ().getMessageInfo ().getMessageId ();
+                final String sAS4ReceiptID = aSendingReport.getAS4ReceivedSignalMsg ()
+                                                           .getMessageInfo ()
+                                                           .getMessageId ();
                 aAttemptMgr.createSuccess (sTxID,
                                            sAS4MessageID,
                                            aAS4Timestamp,
@@ -1531,14 +1535,18 @@ public final class OutboundOrchestrator
                                                                                            aTimestampMgr.getCurrentDateTimeUTC ())
                                                                        : null;
                   for (final var aHandler : APCoreMetaManager.getAllLifecycleHandlers ())
-                    aHandler.onOutboundDocumentSent (sTxID, aTx.getSbdhInstanceID (), aSendingDuration, nNewAttemptCount);
+                    aHandler.onOutboundDocumentSent (sTxID,
+                                                     aTx.getSbdhInstanceID (),
+                                                     aSendingDuration,
+                                                     nNewAttemptCount);
                 }
 
                 // Store Reporting data on success only
                 final boolean bReportingItemStored;
                 if (aReportingItem != null)
                 {
-                  bReportingItemStored = APPeppolReportingHelper.createOutboundPeppolReportingItem (sTxID, aReportingItem)
+                  bReportingItemStored = APPeppolReportingHelper.createOutboundPeppolReportingItem (sTxID,
+                                                                                                    aReportingItem)
                                                                 .isSuccess ();
                   if (bReportingItemStored)
                     LOGGER.info (sRealLogPrefix + "Successfully stored for Peppol Reporting");
@@ -1600,8 +1608,8 @@ public final class OutboundOrchestrator
           aSendingSW.stop ();
           final String sRejectionMsg = CircuitBreakerManager.getRejectionMessage (sCircuitBreakerKeyAP,
                                                                                   "AP access to '" +
-                                                                                                       sReceiverAPURL +
-                                                                                                       "'");
+                                                                                                        sReceiverAPURL +
+                                                                                                        "'");
           aSendingReport.setAS4SendingError (sRejectionMsg);
           aSendingReport.setAS4SendingDurationMillis (aSendingSW.getMillis ());
           aSendingReport.setSendingSuccess (false);

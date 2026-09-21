@@ -611,8 +611,8 @@ public final class APCoreConfig
   }
 
   /**
-   * @return The maximum age of a transaction for which a rejection by a circuit breaker is
-   *         deferred without consuming a retry attempt. Never <code>null</code>.
+   * @return The maximum age of a transaction for which a rejection by a circuit breaker is deferred
+   *         without consuming a retry attempt. Never <code>null</code>.
    * @since 0.13.0
    */
   @NonNull

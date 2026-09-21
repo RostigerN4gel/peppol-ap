@@ -29,8 +29,8 @@ import org.junit.Test;
 import com.helger.datetime.helper.PDTFactory;
 
 /**
- * Test class for {@link OutboundOrchestrator#getCircuitBreakerNextRetryDT(OffsetDateTime,
- * OffsetDateTime, Duration, Duration, Duration)}.
+ * Test class for
+ * {@link OutboundOrchestrator#getCircuitBreakerNextRetryDT(OffsetDateTime, OffsetDateTime, Duration, Duration, Duration)}.
  *
  * @author Philip Helger
  */

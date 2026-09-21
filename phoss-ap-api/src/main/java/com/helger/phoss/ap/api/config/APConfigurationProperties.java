@@ -364,8 +364,8 @@ public final class APConfigurationProperties
   /** @since 0.13.0 */
   public static final int CIRCUIT_BREAKER_FAILURE_EXECUTIONS_DEFAULT = 0;
   /**
-   * The rolling time window the failure threshold is measured over. Only the executions inside
-   * that window are counted.
+   * The rolling time window the failure threshold is measured over. Only the executions inside that
+   * window are counted.
    * <p>
    * <b>Note:</b> without {@link #CIRCUIT_BREAKER_FAILURE_RATE} this makes the circuit breaker
    * <b>more</b> sensitive, not less: the failures inside the window no longer have to be
@@ -377,10 +377,10 @@ public final class APConfigurationProperties
    */
   public static final String CIRCUIT_BREAKER_FAILURE_PERIOD = "circuit-breaker.failure-period";
   /**
-   * The failure rate in percent (1-100) at which the circuit breaker opens. Only used together
-   * with {@link #CIRCUIT_BREAKER_FAILURE_PERIOD}; it replaces the absolute failure threshold. This
-   * is the setting that tolerates isolated failures during short load peaks on an otherwise
-   * healthy SMP or AP.
+   * The failure rate in percent (1-100) at which the circuit breaker opens. Only used together with
+   * {@link #CIRCUIT_BREAKER_FAILURE_PERIOD}; it replaces the absolute failure threshold. This is
+   * the setting that tolerates isolated failures during short load peaks on an otherwise healthy
+   * SMP or AP.
    *
    * @since 0.13.0
    */
