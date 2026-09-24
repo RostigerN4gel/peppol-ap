@@ -16,16 +16,32 @@
  */
 package com.helger.phoss.ap.webapp;
 
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 
+import io.opentelemetry.api.GlobalOpenTelemetry;
+import io.opentelemetry.api.trace.Span;
+
 /**
- * Test class to load the {@link PhossAPApplication} and make sure we're good
+ * Test class to load the {@link PhossAPApplication} and make sure we're good.
+ * <p>
+ * OpenTelemetry is deliberately enabled here, because starting with {@code otel.enabled=true} used
+ * to fail with {@code IllegalStateException: GlobalOpenTelemetry.set has already been called}
+ * (issue #102). The registered {@code OpenTelemetry} instance lives in a JVM global, so exactly one
+ * test class of this module may load a context with it - a second one would find the global already
+ * set and could not tell a regression from the leftovers of its predecessor. All exporters are
+ * switched off, so a real SDK is built but nothing goes onto the network.
+ * </p>
  *
  * @author Philip Helger
  */
-@SpringBootTest
+@SpringBootTest (properties = { "otel.enabled=true",
+                                "otel.traces.exporter=none",
+                                "otel.metrics.exporter=none",
+                                "otel.logs.exporter=none" })
 final class PhossAPApplicationTest
 {
   @BeforeAll
@@ -37,4 +53,22 @@ final class PhossAPApplicationTest
   @Test
   void testContextLoads ()
   {}
+
+  @Test
+  void testOpenTelemetrySdkIsTheGlobalInstance ()
+  {
+    // GlobalOpenTelemetry.get () wraps the registered instance, so the SDK cannot be recognized by
+    // its type. It can be recognized by what it does: the no-op instance - which is what every span
+    // taken before the SDK bootstrap receives - hands out an invalid, non-recording span
+    final Span aSpan = GlobalOpenTelemetry.get ().getTracer ("phoss-ap-test").spanBuilder ("test").startSpan ();
+    try
+    {
+      assertTrue (aSpan.getSpanContext ().isValid (), "The global OpenTelemetry instance is a no-op");
+      assertTrue (aSpan.isRecording (), "The global OpenTelemetry instance does not record spans");
+    }
+    finally
+    {
+      aSpan.end ();
+    }
+  }
 }
