@@ -53,6 +53,7 @@ final class OtelSdkInstaller
     // OpenTelemetry Java agent. That would abort the startup and leak the SDK that was just
     // built, because the exception leaves no handle to close it. The shutdown hook that flushes
     // the exporters on JVM exit is registered by build () either way.
+    @SuppressWarnings ("resource")
     final OpenTelemetrySdk aSdk = AutoConfiguredOpenTelemetrySdk.builder ().build ().getOpenTelemetrySdk ();
     try
     {
