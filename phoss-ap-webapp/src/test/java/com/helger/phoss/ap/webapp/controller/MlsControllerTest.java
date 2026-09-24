@@ -32,13 +32,13 @@ import org.mockito.MockedStatic;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 
-import com.helger.base.state.ESuccess;
 import com.helger.peppol.mls.EPeppolMLSResponseCode;
 import com.helger.peppol.sbdh.EPeppolMLSType;
 import com.helger.peppolid.IParticipantIdentifier;
 import com.helger.peppolid.peppol.doctype.EPredefinedDocumentTypeIdentifier;
 import com.helger.peppolid.peppol.process.EPredefinedProcessIdentifier;
 import com.helger.phoss.ap.api.IInboundTransactionManager;
+import com.helger.phoss.ap.api.codelist.EInboundStatus;
 import com.helger.phoss.ap.api.dto.MlsSendIssue;
 import com.helger.phoss.ap.api.dto.MlsSendRequest;
 import com.helger.phoss.ap.api.dto.ReportResponse;
@@ -77,6 +77,7 @@ final class MlsControllerTest
     when (ret.getDocTypeID ()).thenReturn ("busdox-docid-qns::urn:test:invoice");
     when (ret.getProcessID ()).thenReturn ("cenbii-procid-ubl::urn:test:process");
     when (ret.getMlsType ()).thenReturn (EPeppolMLSType.ALWAYS_SEND);
+    when (ret.getStatus ()).thenReturn (EInboundStatus.FORWARDED);
     return ret;
   }
 
@@ -278,8 +279,7 @@ final class MlsControllerTest
       when (aTxMgr.getBySbdhInstanceID (SBDH_ID)).thenReturn (aTx);
       aMockJdbc.when (APJdbcMetaManager::getInboundTransactionMgr).thenReturn (aTxMgr);
 
-      final MlsCreationResult aCreationResult = MlsCreationResult.suppressed (ESuccess.SUCCESS,
-                                                                              EPeppolMLSResponseCode.ACCEPTANCE);
+      final MlsCreationResult aCreationResult = MlsCreationResult.suppressed (EPeppolMLSResponseCode.ACCEPTANCE);
       aMockHandler.when (() -> MlsHandler.createInboundResultMls (any (), any ())).thenReturn (aCreationResult);
 
       final ResponseEntity <ReportResponse> aResp = m_aController.sendMls (_request ("AP"));
@@ -312,6 +312,59 @@ final class MlsControllerTest
       assertEquals (HttpStatus.INTERNAL_SERVER_ERROR, aResp.getStatusCode ());
       assertNotNull (aResp.getBody ());
       assertEquals ("failed", aResp.getBody ().getStatus ());
+
+      aMockHandler.verify (() -> MlsHandler.sendCreatedMlsAsync (any ()), never ());
+    }
+  }
+
+  @Test
+  void testSendMlsNotForwarded ()
+  {
+    try (final MockedStatic <APCoreConfig> aMockConfig = mockStatic (APCoreConfig.class);
+         final MockedStatic <APJdbcMetaManager> aMockJdbc = mockStatic (APJdbcMetaManager.class);
+         final MockedStatic <MlsHandler> aMockHandler = mockStatic (MlsHandler.class))
+    {
+      aMockConfig.when (APCoreConfig::isMlsSendingEnabled).thenReturn (Boolean.TRUE);
+
+      // The document never reached the Receiver Backend, so it cannot report an outcome for it
+      final IInboundTransaction aTx = _businessDocumentTx ();
+      when (aTx.getStatus ()).thenReturn (EInboundStatus.FORWARD_FAILED);
+
+      final IInboundTransactionManager aTxMgr = mock (IInboundTransactionManager.class);
+      when (aTxMgr.getBySbdhInstanceID (SBDH_ID)).thenReturn (aTx);
+      aMockJdbc.when (APJdbcMetaManager::getInboundTransactionMgr).thenReturn (aTxMgr);
+
+      final ResponseEntity <ReportResponse> aResp = m_aController.sendMls (_request ("AP"));
+      assertEquals (HttpStatus.UNPROCESSABLE_CONTENT, aResp.getStatusCode ());
+      assertNotNull (aResp.getBody ());
+      assertEquals ("not-eligible", aResp.getBody ().getStatus ());
+
+      aMockHandler.verify (() -> MlsHandler.createInboundResultMls (any (), any ()), never ());
+    }
+  }
+
+  @Test
+  void testSendMlsAlreadyDeterminedInTheMeantime ()
+  {
+    try (final MockedStatic <APCoreConfig> aMockConfig = mockStatic (APCoreConfig.class);
+         final MockedStatic <APJdbcMetaManager> aMockJdbc = mockStatic (APJdbcMetaManager.class);
+         final MockedStatic <MlsHandler> aMockHandler = mockStatic (MlsHandler.class))
+    {
+      aMockConfig.when (APCoreConfig::isMlsSendingEnabled).thenReturn (Boolean.TRUE);
+
+      // The transaction still looks unanswered, but the MLS claim was lost - e.g. to the watchdog
+      final IInboundTransaction aTx = _businessDocumentTx ();
+      final IInboundTransactionManager aTxMgr = mock (IInboundTransactionManager.class);
+      when (aTxMgr.getBySbdhInstanceID (SBDH_ID)).thenReturn (aTx);
+      aMockJdbc.when (APJdbcMetaManager::getInboundTransactionMgr).thenReturn (aTxMgr);
+
+      aMockHandler.when (() -> MlsHandler.createInboundResultMls (any (), any ()))
+                  .thenReturn (MlsCreationResult.alreadyDetermined (EPeppolMLSResponseCode.ACCEPTANCE));
+
+      final ResponseEntity <ReportResponse> aResp = m_aController.sendMls (_request ("AP"));
+      assertEquals (HttpStatus.CONFLICT, aResp.getStatusCode ());
+      assertNotNull (aResp.getBody ());
+      assertEquals ("conflict", aResp.getBody ().getStatus ());
 
       aMockHandler.verify (() -> MlsHandler.sendCreatedMlsAsync (any ()), never ());
     }

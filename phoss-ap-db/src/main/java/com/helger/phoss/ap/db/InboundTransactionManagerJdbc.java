@@ -376,6 +376,41 @@ public class InboundTransactionManagerJdbc extends AbstractAPJdbcManager impleme
 
   /** {@inheritDoc} */
   @NonNull
+  public ESuccess claimMlsResponseCode (@NonNull final String sID,
+                                        @NonNull final EPeppolMLSResponseCode eMlsResponseCode)
+  {
+    ValueEnforcer.notNull (sID, "ID");
+    ValueEnforcer.notNull (eMlsResponseCode, "MlsResponseCode");
+
+    // The "IS NULL" condition is the whole point: the first writer wins and every later one gets 0
+    // affected rows, so that no second MLS can be created for the same business document
+    final long nRowsAffected = newExecutor ().insertOrUpdateOrDelete ("UPDATE " +
+                                                                      m_sTableName +
+                                                                      " SET mls_response_code=?" +
+                                                                      " WHERE id=? AND mls_response_code IS NULL",
+                                                                      new ConstantPreparedStatementDataProvider (eMlsResponseCode.getID (),
+                                                                                                                 sID));
+    return ESuccess.valueOf (nRowsAffected == 1);
+  }
+
+  /** {@inheritDoc} */
+  @NonNull
+  public ESuccess releaseMlsResponseCodeClaim (@NonNull final String sID)
+  {
+    ValueEnforcer.notNull (sID, "ID");
+
+    // The "IS NULL" condition on the outbound transaction ID makes this safe: the response code of
+    // an MLS that made it to an outbound transaction can never be erased by a release
+    final long nRowsAffected = newExecutor ().insertOrUpdateOrDelete ("UPDATE " +
+                                                                      m_sTableName +
+                                                                      " SET mls_response_code=NULL" +
+                                                                      " WHERE id=? AND mls_outbound_transaction_id IS NULL",
+                                                                      new ConstantPreparedStatementDataProvider (sID));
+    return ESuccess.valueOf (nRowsAffected == 1);
+  }
+
+  /** {@inheritDoc} */
+  @NonNull
   public ESuccess updateVerificationResult (@NonNull final String sID,
                                             @NonNull final EVerificationResult eVerificationResult,
                                             @Nullable final String sVerificationDetails)
@@ -468,29 +503,36 @@ public class InboundTransactionManagerJdbc extends AbstractAPJdbcManager impleme
   /** {@inheritDoc} */
   @NonNull
   public ICommonsList <IInboundTransaction> getAllForMlsApiTimeout (@Nonnegative final int nBatchSize,
-                                                                    @NonNull final OffsetDateTime aMaxCompletedDT)
+                                                                    @NonNull final OffsetDateTime aMaxAS4Timestamp)
   {
     ValueEnforcer.isGT0 (nBatchSize, "BatchSize");
-    ValueEnforcer.notNull (aMaxCompletedDT, "MaxCompletedDT");
+    ValueEnforcer.notNull (aMaxAS4Timestamp, "MaxAS4Timestamp");
 
-    // Forwarded business documents (neither MLS nor MLR) that were forwarded long enough ago and
-    // for which no MLS response code was determined yet. A document that was rejected by the
-    // verification is excluded, because C2 already received the negative MLS (RE) of that rejection
+    // Forwarded business documents (neither MLS nor MLR) that were received long enough ago and
+    // for which no MLS response code was determined yet. The age is deliberately measured on the
+    // AS4 timestamp and not on "completed_dt", because MLS-1 is measured from the reception of the
+    // document - anchoring on the forwarding would add the forwarding duration on top of the SLA
+    // budget instead of consuming it from it. A document that was rejected by the verification is
+    // excluded, because C2 already received the negative MLS (RE) of that rejection, and so is one
+    // with the MLS type FAILURE_ONLY, which never gets a positive MLS at all - recording a fallback
+    // response code for it would only block the rejection the Receiver Backend may still report
     final ICommonsList <DBResultRow> aRows = newExecutor ().queryAll ("SELECT " +
                                                                       COLS +
                                                                       " FROM " +
                                                                       m_sTableName +
                                                                       " WHERE status=? AND mls_response_code IS NULL" +
-                                                                      " AND completed_dt < ?" +
+                                                                      " AND as4_timestamp < ?" +
+                                                                      " AND mls_type <> ?" +
                                                                       " AND NOT (doc_type_id=? AND process_id=?)" +
                                                                       " AND NOT (doc_type_id=? AND process_id=?)" +
                                                                       " AND (verification_result IS NULL OR verification_result <> ?)" +
-                                                                      " ORDER BY completed_dt" +
+                                                                      " ORDER BY as4_timestamp" +
                                                                       " LIMIT " +
                                                                       nBatchSize +
                                                                       " FOR UPDATE SKIP LOCKED",
                                                                       new ConstantPreparedStatementDataProvider (EInboundStatus.FORWARDED.getID (),
-                                                                                                                 DBValueHelper.toTimestamp (aMaxCompletedDT),
+                                                                                                                 DBValueHelper.toTimestamp (aMaxAS4Timestamp),
+                                                                                                                 EPeppolMLSType.FAILURE_ONLY.getID (),
                                                                                                                  EPredefinedDocumentTypeIdentifier.PEPPOL_MLS_1_0.getURIEncoded (),
                                                                                                                  EPredefinedProcessIdentifier.urn_peppol_edec_mls.getURIEncoded (),
                                                                                                                  EPredefinedDocumentTypeIdentifier.APPLICATIONRESPONSE_FDC_PEPPOL_EU_POACC_TRNS_MLR_3.getURIEncoded (),

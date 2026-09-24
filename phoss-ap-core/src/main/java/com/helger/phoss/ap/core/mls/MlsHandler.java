@@ -169,7 +169,7 @@ public final class MlsHandler
     if (!APCoreConfig.isMlsSendingEnabled ())
     {
       LOGGER.info ("MLS sending is globally disabled - skipping MLS for transaction '" + aInboundTx.getID () + "'");
-      return MlsCreationResult.suppressed (ESuccess.SUCCESS, aOutcome.getResponseCode ());
+      return MlsCreationResult.suppressed (aOutcome.getResponseCode ());
     }
 
     try (final ITelemetrySpan aSpan = Telemetry.startSpan (CPhossAPOtel.SPAN_MLS_SEND, ETelemetrySpanKind.PRODUCER)
@@ -236,6 +236,12 @@ public final class MlsHandler
       if (aCreationResult.isFailure ())
         return ESuccess.FAILURE;
 
+      if (aCreationResult.isAlreadyDetermined ())
+      {
+        // Somebody else answered C2 first - the desired end state holds, so this is no failure
+        return ESuccess.SUCCESS;
+      }
+
       if (!aCreationResult.hasMlsTx ())
       {
         // Deliberately not sent - the response code was recorded nevertheless
@@ -247,10 +253,15 @@ public final class MlsHandler
   }
 
   /**
-   * Create the MLS document, store it and persist the outbound transaction for it. This is the
-   * shared body of {@link #createInboundResultMls(IInboundTransaction, MlsOutcome)} and
+   * Claim the single MLS slot of the inbound transaction and create the MLS if the claim was won.
+   * This is the shared body of {@link #createInboundResultMls(IInboundTransaction, MlsOutcome)} and
    * {@link #triggerSendingInboundResultMls(IInboundTransaction, MlsOutcome)}, and expects the
    * global MLS kill switch to have been evaluated by the caller.
+   * <p>
+   * Every MLS of an inbound transaction is created here - the receive path, the retry scheduler,
+   * the MLS watchdog, the operations endpoint and the MLS sending endpoint alike - so this is the
+   * single place where "exactly one MLS per business document" can be enforced for all of them.
+   * </p>
    *
    * @param aInboundTx
    *        The inbound transaction. Never <code>null</code>.
@@ -261,6 +272,48 @@ public final class MlsHandler
   @NonNull
   private static MlsCreationResult _createInboundResultMls (@NonNull final IInboundTransaction aInboundTx,
                                                             @NonNull final MlsOutcome aOutcome)
+  {
+    final IInboundTransactionManager aInboundMgr = APJdbcMetaManager.getInboundTransactionMgr ();
+    final EPeppolMLSResponseCode eResponseCode = aOutcome.getResponseCode ();
+
+    // Peppol expects exactly one MLS per business document, so the slot is reserved before
+    // anything is built. The claim is atomic, which is what a check of the current response code
+    // could never be: the transaction at hand is a snapshot that was read before the forwarding,
+    // and a Receiver Backend may have reported the outcome in the meantime
+    if (aInboundMgr.claimMlsResponseCode (aInboundTx.getID (), eResponseCode).isFailure ())
+    {
+      LOGGER.info ("An MLS was already determined for the inbound transaction '" +
+                   aInboundTx.getID () +
+                   "' - not creating a second one for the response code '" +
+                   eResponseCode.getID () +
+                   "'");
+      return MlsCreationResult.alreadyDetermined (eResponseCode);
+    }
+
+    final MlsCreationResult ret = _createClaimedInboundResultMls (aInboundTx, aOutcome);
+    if (ret.isFailure ())
+    {
+      // The claim must not outlive a failed creation - the transaction would look answered while
+      // nothing was ever sent, and no later attempt could correct that
+      if (aInboundMgr.releaseMlsResponseCodeClaim (aInboundTx.getID ()).isFailure ())
+        LOGGER.error ("Failed to release the MLS claim of the inbound transaction '" + aInboundTx.getID () + "'");
+    }
+    return ret;
+  }
+
+  /**
+   * Create the MLS document, store it and persist the outbound transaction for it. Expects the MLS
+   * slot of the inbound transaction to have been claimed by the caller.
+   *
+   * @param aInboundTx
+   *        The inbound transaction. Never <code>null</code>.
+   * @param aOutcome
+   *        The MLS outcome. Never <code>null</code>.
+   * @return The creation result. Never <code>null</code>.
+   */
+  @NonNull
+  private static MlsCreationResult _createClaimedInboundResultMls (@NonNull final IInboundTransaction aInboundTx,
+                                                                   @NonNull final MlsOutcome aOutcome)
   {
     final IAPTimestampManager aTimestampMgr = APBasicMetaManager.getTimestampMgr ();
     final IIdentifierFactory aIF = APBasicMetaManager.getIdentifierFactory ();
@@ -279,11 +332,9 @@ public final class MlsHandler
                    " (FAILURE_ONLY, outcome=" +
                    eResponseCode.getID () +
                    ")");
-      final String sMlsOutboundTransactionID = null;
-      return MlsCreationResult.suppressed (aInboundMgr.updateMlsFields (aInboundTx.getID (),
-                                                                        eResponseCode,
-                                                                        sMlsOutboundTransactionID),
-                                           eResponseCode);
+      // The response code is already recorded by the claim - there is no MLS outbound transaction
+      // to add to it
+      return MlsCreationResult.suppressed (eResponseCode);
     }
 
     LOGGER.info ("Creating MLS response (" +

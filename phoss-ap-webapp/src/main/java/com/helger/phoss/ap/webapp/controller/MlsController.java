@@ -39,6 +39,7 @@ import com.helger.peppol.mls.EPeppolMLSResponseCode;
 import com.helger.peppol.mls.EPeppolMLSStatusReasonCode;
 import com.helger.phoss.ap.api.CPhossAP;
 import com.helger.phoss.ap.api.IInboundTransactionManager;
+import com.helger.phoss.ap.api.codelist.EInboundStatus;
 import com.helger.phoss.ap.api.config.APConfigurationProperties;
 import com.helger.phoss.ap.api.dto.InboundTransactionResponse;
 import com.helger.phoss.ap.api.dto.MlsSendIssue;
@@ -235,7 +236,8 @@ public class MlsController
                    @ApiResponse (responseCode = "409",
                                  description = "An MLS was already determined for this transaction"),
                    @ApiResponse (responseCode = "422",
-                                 description = "The transaction is itself an MLS or MLR document and is never answered with an MLS"),
+                                 description = "The transaction is itself an MLS or MLR document and is never answered with an MLS, " +
+                                               "or it is not in the status 'forwarded' and was therefore not (yet) delivered"),
                    @ApiResponse (responseCode = "500", description = "The MLS could not be created"),
                    @ApiResponse (responseCode = "503", description = "MLS sending is globally disabled") })
   public ResponseEntity <ReportResponse> sendMls (@RequestBody final MlsSendRequest aRequest)
@@ -358,6 +360,19 @@ public class MlsController
                                "The inbound transaction was rejected by the verification - C2 already received the negative MLS of that rejection");
     }
 
+    // Only a document that reached the Receiver Backend can have an outcome the backend knows
+    if (aTx.getStatus () != EInboundStatus.FORWARDED)
+    {
+      return _mlsSendResponse (HttpStatus.UNPROCESSABLE_CONTENT,
+                               aTx.getID (),
+                               "not-eligible",
+                               "The inbound transaction is in the status '" +
+                                            aTx.getStatus ().getID () +
+                                            "' and was therefore not (yet) delivered - only a transaction in the status '" +
+                                            EInboundStatus.FORWARDED.getID () +
+                                            "' can be answered with an MLS from the Receiver Backend");
+    }
+
     LOGGER.info ("Received the API triggered MLS (" +
                  eResponseCode.getID () +
                  ") for inbound transaction '" +
@@ -368,6 +383,16 @@ public class MlsController
 
     final MlsOutcome aOutcome = new MlsOutcome (eResponseCode, aRequest.getResponseText (), aIssues);
     final MlsCreationResult aCreationResult = MlsHandler.createInboundResultMls (aTx, aOutcome);
+    if (aCreationResult.isAlreadyDetermined ())
+    {
+      // The check above reads a snapshot, this is the race free verdict of the claim - e.g. the
+      // MLS watchdog or a second call of this endpoint got here first
+      return _mlsSendResponse (HttpStatus.CONFLICT,
+                               aTx.getID (),
+                               "conflict",
+                               "An MLS was already determined for this inbound transaction in the meantime");
+    }
+
     if (aCreationResult.isFailure ())
     {
       return _mlsSendResponse (HttpStatus.INTERNAL_SERVER_ERROR,

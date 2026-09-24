@@ -529,6 +529,13 @@ public final class JdbcManagerIntegrationTest
 
   private static String _createInboundTx (@NonNull final String sDocTypeID, @NonNull final String sProcessID)
   {
+    return _createInboundTx (sDocTypeID, sProcessID, EPeppolMLSType.ALWAYS_SEND);
+  }
+
+  private static String _createInboundTx (@NonNull final String sDocTypeID,
+                                          @NonNull final String sProcessID,
+                                          @NonNull final EPeppolMLSType eMlsType)
+  {
     return APJdbcMetaManager.getInboundTransactionMgr ()
                             .create (_uniqueID (),
                                      "POP000001",
@@ -548,7 +555,7 @@ public final class JdbcManagerIntegrationTest
                                      false,
                                      false,
                                      null,
-                                     EPeppolMLSType.ALWAYS_SEND);
+                                     eMlsType);
   }
 
   @Test
@@ -922,6 +929,55 @@ public final class JdbcManagerIntegrationTest
   }
 
   @Test
+  public void testInboundClaimMlsResponseCode ()
+  {
+    final IInboundTransactionManager aMgr = APJdbcMetaManager.getInboundTransactionMgr ();
+    final String sID = _createInboundTx ();
+    assertNotNull (sID);
+
+    // The first claim wins
+    assertTrue (aMgr.claimMlsResponseCode (sID, EPeppolMLSResponseCode.ACCEPTANCE).isSuccess ());
+    assertEquals (EPeppolMLSResponseCode.ACCEPTANCE, aMgr.getByID (sID).getMlsResponseCode ());
+
+    // Every later one is told that the MLS is already decided, and changes nothing
+    assertTrue (aMgr.claimMlsResponseCode (sID, EPeppolMLSResponseCode.REJECTION).isFailure ());
+    assertEquals (EPeppolMLSResponseCode.ACCEPTANCE, aMgr.getByID (sID).getMlsResponseCode ());
+  }
+
+  @Test
+  public void testInboundReleaseMlsResponseCodeClaim ()
+  {
+    final IInboundTransactionManager aMgr = APJdbcMetaManager.getInboundTransactionMgr ();
+    final String sID = _createInboundTx ();
+    assertNotNull (sID);
+
+    // A claim whose MLS was never created can be given back, so a later attempt can answer C2
+    assertTrue (aMgr.claimMlsResponseCode (sID, EPeppolMLSResponseCode.ACCEPTANCE).isSuccess ());
+    assertTrue (aMgr.releaseMlsResponseCodeClaim (sID).isSuccess ());
+    assertNull (aMgr.getByID (sID).getMlsResponseCode ());
+
+    assertTrue (aMgr.claimMlsResponseCode (sID, EPeppolMLSResponseCode.REJECTION).isSuccess ());
+    assertEquals (EPeppolMLSResponseCode.REJECTION, aMgr.getByID (sID).getMlsResponseCode ());
+  }
+
+  @Test
+  public void testInboundReleaseMlsResponseCodeClaimKeepsSentMls ()
+  {
+    final IInboundTransactionManager aMgr = APJdbcMetaManager.getInboundTransactionMgr ();
+    final String sID = _createInboundTx ();
+    assertNotNull (sID);
+
+    // An MLS that made it to an outbound transaction must never be erased by a release
+    assertTrue (aMgr.updateMlsFields (sID, EPeppolMLSResponseCode.ACCEPTANCE, "mls-outbound-tx-002").isSuccess ());
+    assertTrue (aMgr.releaseMlsResponseCodeClaim (sID).isFailure ());
+
+    final IInboundTransaction aTx = aMgr.getByID (sID);
+    assertNotNull (aTx);
+    assertEquals (EPeppolMLSResponseCode.ACCEPTANCE, aTx.getMlsResponseCode ());
+    assertEquals ("mls-outbound-tx-002", aTx.getMlsOutboundTransactionID ());
+  }
+
+  @Test
   public void testInboundUpdateReportingStatus ()
   {
     final IInboundTransactionManager aMgr = APJdbcMetaManager.getInboundTransactionMgr ();
@@ -1042,6 +1098,22 @@ public final class JdbcManagerIntegrationTest
     assertFalse (aList.containsAny (x -> x.getID ().equals (sMlsID)));
     assertFalse (aList.containsAny (x -> x.getID ().equals (sMlrID)));
     assertFalse (aList.containsAny (x -> x.getID ().equals (sRejectedID)));
+  }
+
+  @Test
+  public void testInboundGetAllForMlsApiTimeoutExcludesFailureOnly ()
+  {
+    final IInboundTransactionManager aMgr = APJdbcMetaManager.getInboundTransactionMgr ();
+
+    // A FAILURE_ONLY transaction never gets a positive MLS, so the watchdog must not record a
+    // fallback response code for it - that would block the rejection the backend may still report
+    final String sID = _createInboundTx ("busdox-docid-qns::urn:test:invoice",
+                                         "cenbii-procid-ubl::urn:test:process",
+                                         EPeppolMLSType.FAILURE_ONLY);
+    assertNotNull (sID);
+    aMgr.updateStatusCompleted (sID, EInboundStatus.FORWARDED);
+
+    assertFalse (aMgr.getAllForMlsApiTimeout (100, _now ().plusHours (1)).containsAny (x -> x.getID ().equals (sID)));
   }
 
   // --- OutboundSendingAttemptManager ---

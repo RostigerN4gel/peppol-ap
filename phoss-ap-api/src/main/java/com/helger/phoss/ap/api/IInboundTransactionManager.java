@@ -272,6 +272,38 @@ public interface IInboundTransactionManager
                             @Nullable String sMlsOutboundTransactionID);
 
   /**
+   * Atomically reserve the single MLS slot of an inbound transaction. The response code is only
+   * written if none was determined for the transaction yet, so the first caller wins and every
+   * later one is told that the MLS is already decided. This is what keeps a Receiver Backend that
+   * reports via {@code POST /api/mls/send}, the automatic MLS of the receive path and the MLS
+   * watchdog from all answering C2 for the same business document.
+   *
+   * @param sID
+   *        The transaction ID. Never <code>null</code>.
+   * @param eMlsResponseCode
+   *        The MLS response code to claim the slot with. Never <code>null</code>.
+   * @return {@link ESuccess#SUCCESS} if the slot was claimed by this call,
+   *         {@link ESuccess#FAILURE} if an MLS response code was already determined.
+   * @since 0.13.0
+   */
+  @NonNull
+  ESuccess claimMlsResponseCode (@NonNull String sID, @NonNull EPeppolMLSResponseCode eMlsResponseCode);
+
+  /**
+   * Give back a claim made by {@link #claimMlsResponseCode(String, EPeppolMLSResponseCode)} whose
+   * MLS was never created, so that a later attempt can answer C2 after all. The response code is
+   * only cleared as long as no MLS outbound transaction is referenced, so the code of an MLS that
+   * really exists can never be erased by this.
+   *
+   * @param sID
+   *        The transaction ID. Never <code>null</code>.
+   * @return {@link ESuccess}
+   * @since 0.13.0
+   */
+  @NonNull
+  ESuccess releaseMlsResponseCodeClaim (@NonNull String sID);
+
+  /**
    * Update the verdict of the inbound document verification. The verdict is deliberately stored
    * independently of the transaction status, so that it survives the forwarding state machine and
    * is not cleared by {@link #updateStatusCompleted(String, EInboundStatus)}.
@@ -338,23 +370,32 @@ public interface IInboundTransactionManager
    * fallback MLS.
    * <p>
    * Returned are the transactions in status {@link EInboundStatus#FORWARDED} without an MLS
-   * response code, whose {@code completed_dt} is older than the provided limit. Inbound MLS and MLR
-   * documents are excluded, because they are never answered with an MLS, and so is a document that
-   * was rejected by the verification, because C2 already received the negative MLS (RE) of that
-   * rejection.
+   * response code, whose {@code as4_timestamp} is older than the provided limit. The age is
+   * deliberately measured from the reception of the document and not from its forwarding, because
+   * that is what the MLS-1 service level of the Peppol Network Policy measures - a forwarding that
+   * itself took a long time therefore shortens the window of the Receiver Backend instead of
+   * extending the SLA budget.
+   * </p>
+   * <p>
+   * Excluded are inbound MLS and MLR documents, because they are never answered with an MLS, a
+   * document that was rejected by the verification, because C2 already received the negative MLS
+   * (RE) of that rejection, and a document with the MLS type
+   * {@link com.helger.peppol.sbdh.EPeppolMLSType#FAILURE_ONLY}, which never gets a positive MLS at
+   * all - recording a fallback response code for it would only block the rejection the Receiver
+   * Backend may still report.
    * </p>
    *
    * @param nBatchSize
    *        Maximum number of transactions to return. Must be &gt; 0.
-   * @param aMaxCompletedDT
-   *        Only transactions that were forwarded before this date time are returned. May not be
+   * @param aMaxAS4Timestamp
+   *        Only transactions that were received before this date time are returned. May not be
    *        <code>null</code>.
    * @return The list of transactions. Never <code>null</code>.
    * @since 0.13.0
    */
   @NonNull
   ICommonsList <IInboundTransaction> getAllForMlsApiTimeout (@Nonnegative int nBatchSize,
-                                                             @NonNull OffsetDateTime aMaxCompletedDT);
+                                                             @NonNull OffsetDateTime aMaxAS4Timestamp);
 
   /**
    * Get completed inbound transactions eligible for archival.

@@ -30,7 +30,7 @@ import com.helger.phoss.ap.core.outbound.MlsSmpFallback;
  * therefore yields the MLS transaction ID - can be answered to an API caller before the AS4
  * transmission is even started.
  * <p>
- * Three outcomes are distinguished:
+ * Four outcomes are distinguished:
  * </p>
  * <ul>
  * <li>created - {@link #isSuccess()} and {@link #hasMlsTx()} are both <code>true</code>: the MLS
@@ -40,6 +40,10 @@ import com.helger.phoss.ap.core.outbound.MlsSmpFallback;
  * {@code mls.sending.enabled=false} - which records nothing at all - and for a successful response
  * code with {@link com.helger.peppol.sbdh.EPeppolMLSType#FAILURE_ONLY}, where the response code is
  * recorded on the inbound transaction nevertheless.</li>
+ * <li>already determined - {@link #isAlreadyDetermined()} is <code>true</code>: another party got
+ * there first and the single MLS of the business document is already decided. Nothing was built and
+ * nothing was changed. This is not an error - the desired end state, exactly one MLS per business
+ * document, holds - but an API caller must be told about it.</li>
  * <li>failed - {@link #isFailure()} is <code>true</code>: the MLS could not be built, serialized or
  * persisted. The details are in the log.</li>
  * </ul>
@@ -50,18 +54,22 @@ import com.helger.phoss.ap.core.outbound.MlsSmpFallback;
  *        The MLS response code of the created MLS. <code>null</code> only if the creation failed
  *        before the response code was known.
  * @param mlsTx
- *        The created outbound MLS transaction. <code>null</code> if the MLS was suppressed or the
- *        creation failed.
+ *        The created outbound MLS transaction. <code>null</code> if the MLS was suppressed, already
+ *        determined by somebody else or the creation failed.
  * @param smpFallback
  *        The MLS specific SMP lookup fallback to use for the sending, according to MLS SPOG section
  *        5.4. <code>null</code> if and only if {@code mlsTx} is <code>null</code>.
+ * @param alreadyDetermined
+ *        <code>true</code> if the MLS of the inbound transaction was already determined and this
+ *        call therefore did nothing at all.
  * @author Philip Helger
  * @since 0.13.0
  */
 public record MlsCreationResult (@NonNull ESuccess success,
                                  @Nullable EPeppolMLSResponseCode responseCode,
                                  @Nullable IOutboundTransaction mlsTx,
-                                 @Nullable MlsSmpFallback smpFallback)
+                                 @Nullable MlsSmpFallback smpFallback,
+                                 boolean alreadyDetermined)
 {
   /**
    * @return <code>true</code> if the creation succeeded - which includes a deliberately suppressed
@@ -78,6 +86,15 @@ public record MlsCreationResult (@NonNull ESuccess success,
   public boolean isFailure ()
   {
     return success.isFailure ();
+  }
+
+  /**
+   * @return <code>true</code> if the MLS of the inbound transaction was already determined by
+   *         somebody else and nothing was created by this call.
+   */
+  public boolean isAlreadyDetermined ()
+  {
+    return alreadyDetermined;
   }
 
   /**
@@ -114,24 +131,34 @@ public record MlsCreationResult (@NonNull ESuccess success,
                                            @NonNull final IOutboundTransaction aMlsTx,
                                            @NonNull final MlsSmpFallback aSmpFallback)
   {
-    return new MlsCreationResult (ESuccess.SUCCESS, eResponseCode, aMlsTx, aSmpFallback);
+    return new MlsCreationResult (ESuccess.SUCCESS, eResponseCode, aMlsTx, aSmpFallback, false);
   }
 
   /**
    * Create the result of an MLS that is deliberately not put on the wire.
    *
-   * @param eSuccess
-   *        Whether recording the response code on the inbound transaction succeeded, or
-   *        {@link ESuccess#SUCCESS} if nothing had to be recorded. May not be <code>null</code>.
    * @param eResponseCode
    *        The MLS response code that was recorded. May not be <code>null</code>.
    * @return A new {@link MlsCreationResult}. Never <code>null</code>.
    */
   @NonNull
-  public static MlsCreationResult suppressed (@NonNull final ESuccess eSuccess,
-                                              @NonNull final EPeppolMLSResponseCode eResponseCode)
+  public static MlsCreationResult suppressed (@NonNull final EPeppolMLSResponseCode eResponseCode)
   {
-    return new MlsCreationResult (eSuccess, eResponseCode, null, null);
+    return new MlsCreationResult (ESuccess.SUCCESS, eResponseCode, null, null, false);
+  }
+
+  /**
+   * Create the result of an MLS that was not created, because the MLS of the inbound transaction
+   * was already determined by somebody else.
+   *
+   * @param eResponseCode
+   *        The MLS response code that was intended by this caller. May not be <code>null</code>.
+   * @return A new {@link MlsCreationResult}. Never <code>null</code>.
+   */
+  @NonNull
+  public static MlsCreationResult alreadyDetermined (@NonNull final EPeppolMLSResponseCode eResponseCode)
+  {
+    return new MlsCreationResult (ESuccess.SUCCESS, eResponseCode, null, null, true);
   }
 
   /**
@@ -144,6 +171,6 @@ public record MlsCreationResult (@NonNull ESuccess success,
   @NonNull
   public static MlsCreationResult failure (@Nullable final EPeppolMLSResponseCode eResponseCode)
   {
-    return new MlsCreationResult (ESuccess.FAILURE, eResponseCode, null, null);
+    return new MlsCreationResult (ESuccess.FAILURE, eResponseCode, null, null, false);
   }
 }

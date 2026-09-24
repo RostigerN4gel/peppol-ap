@@ -29,6 +29,7 @@ import com.helger.base.exception.InitializationException;
 import com.helger.base.timing.StopWatch;
 import com.helger.collection.commons.ICommonsList;
 import com.helger.peppol.mls.EPeppolMLSResponseCode;
+import com.helger.peppol.sbdh.EPeppolMLSType;
 import com.helger.phoss.ap.api.codelist.EInboundStatus;
 import com.helger.phoss.ap.api.codelist.EMlsSendingTrigger;
 import com.helger.phoss.ap.api.model.IInboundTransaction;
@@ -242,6 +243,12 @@ public final class RetryScheduler
    * Receiver Backend that did not report the outcome of a successfully forwarded document within
    * {@code mls.sending.api.timeout}. Without it a silent backend would push this AP out of the
    * MLS-1 compliance of the Peppol Network Policy - 99.5 % of all MLS responses within 20 minutes.
+   * <p>
+   * The timeout is measured from the reception of the document, because that is where the MLS-1
+   * clock starts. A forwarding that itself took a long time therefore shortens the window of the
+   * backend instead of extending the SLA budget - in the extreme case the fallback goes out with
+   * the first cycle after the forwarding, which is the correct answer when there is no budget left.
+   * </p>
    *
    * @param nBatchSize
    *        The maximum number of transactions to answer per cycle. Must be &gt; 0.
@@ -270,11 +277,11 @@ public final class RetryScheduler
       try
       {
         final Duration aTimeout = APCoreConfig.getMlsSendingApiTimeout ();
-        final OffsetDateTime aMaxCompletedDT = APBasicMetaManager.getTimestampMgr ()
-                                                                 .getCurrentDateTimeUTC ()
-                                                                 .minus (aTimeout);
+        final OffsetDateTime aMaxAS4Timestamp = APBasicMetaManager.getTimestampMgr ()
+                                                                  .getCurrentDateTimeUTC ()
+                                                                  .minus (aTimeout);
         final ICommonsList <IInboundTransaction> aTransactions = aInboundMgr.getAllForMlsApiTimeout (nBatchSize,
-                                                                                                     aMaxCompletedDT);
+                                                                                                     aMaxAS4Timestamp);
 
         if (aTransactions.isNotEmpty ())
         {
@@ -294,6 +301,11 @@ public final class RetryScheduler
           {
             // The DB query already excludes them, but a custom manager implementation might not
             if (InboundOrchestrator.isMlsSuppressedAfterRejection (aInboundTx))
+              continue;
+
+            // A FAILURE_ONLY transaction never gets a positive MLS, so recording a fallback
+            // response code for it would only block the rejection the backend may still report
+            if (aInboundTx.getMlsType () == EPeppolMLSType.FAILURE_ONLY)
               continue;
 
             nProcessed++;
