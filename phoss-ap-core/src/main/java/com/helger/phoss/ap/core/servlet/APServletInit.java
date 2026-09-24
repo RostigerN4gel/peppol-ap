@@ -84,7 +84,7 @@ import com.helger.security.revocation.ERevocationCheckMode;
 import com.helger.servlet.ServletHelper;
 import com.helger.smpclient.config.SMPClientConfiguration;
 import com.helger.smpclient.peppol.SMPClientReadOnly;
-import com.helger.smpclient.url.PeppolNaptrURLProvider;
+import com.helger.smpclient.url.dns.PeppolNaptrURLProvider;
 import com.helger.web.scope.mgr.WebScopeManager;
 import com.helger.xservlet.requesttrack.RequestTrackerSettings;
 
