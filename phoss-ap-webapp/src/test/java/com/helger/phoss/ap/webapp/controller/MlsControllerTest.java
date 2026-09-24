@@ -85,7 +85,7 @@ final class MlsControllerTest
   {
     try (final MockedStatic <APCoreConfig> aMockConfig = mockStatic (APCoreConfig.class))
     {
-      aMockConfig.when (APCoreConfig::isMlsSendingEnabled).thenReturn (false);
+      aMockConfig.when (APCoreConfig::isMlsSendingEnabled).thenReturn (Boolean.FALSE);
 
       final ResponseEntity <ReportResponse> aResp = m_aController.sendMls (_request ("AP"));
       assertEquals (HttpStatus.SERVICE_UNAVAILABLE, aResp.getStatusCode ());
@@ -99,7 +99,7 @@ final class MlsControllerTest
   {
     try (final MockedStatic <APCoreConfig> aMockConfig = mockStatic (APCoreConfig.class))
     {
-      aMockConfig.when (APCoreConfig::isMlsSendingEnabled).thenReturn (true);
+      aMockConfig.when (APCoreConfig::isMlsSendingEnabled).thenReturn (Boolean.TRUE);
 
       final MlsSendRequest aRequest = _request ("AP");
       aRequest.setSbdhInstanceID (null);
@@ -116,7 +116,7 @@ final class MlsControllerTest
   {
     try (final MockedStatic <APCoreConfig> aMockConfig = mockStatic (APCoreConfig.class))
     {
-      aMockConfig.when (APCoreConfig::isMlsSendingEnabled).thenReturn (true);
+      aMockConfig.when (APCoreConfig::isMlsSendingEnabled).thenReturn (Boolean.TRUE);
 
       final ResponseEntity <ReportResponse> aResp = m_aController.sendMls (_request ("XX"));
       assertEquals (HttpStatus.BAD_REQUEST, aResp.getStatusCode ());
@@ -130,7 +130,7 @@ final class MlsControllerTest
   {
     try (final MockedStatic <APCoreConfig> aMockConfig = mockStatic (APCoreConfig.class))
     {
-      aMockConfig.when (APCoreConfig::isMlsSendingEnabled).thenReturn (true);
+      aMockConfig.when (APCoreConfig::isMlsSendingEnabled).thenReturn (Boolean.TRUE);
 
       final ResponseEntity <ReportResponse> aResp = m_aController.sendMls (_request ("RE"));
       assertEquals (HttpStatus.BAD_REQUEST, aResp.getStatusCode ());
@@ -144,7 +144,7 @@ final class MlsControllerTest
   {
     try (final MockedStatic <APCoreConfig> aMockConfig = mockStatic (APCoreConfig.class))
     {
-      aMockConfig.when (APCoreConfig::isMlsSendingEnabled).thenReturn (true);
+      aMockConfig.when (APCoreConfig::isMlsSendingEnabled).thenReturn (Boolean.TRUE);
 
       final MlsSendIssue aIssue = new MlsSendIssue ();
       aIssue.setStatusReasonCode ("XX");
@@ -167,7 +167,7 @@ final class MlsControllerTest
     try (final MockedStatic <APCoreConfig> aMockConfig = mockStatic (APCoreConfig.class);
          final MockedStatic <APJdbcMetaManager> aMockJdbc = mockStatic (APJdbcMetaManager.class))
     {
-      aMockConfig.when (APCoreConfig::isMlsSendingEnabled).thenReturn (true);
+      aMockConfig.when (APCoreConfig::isMlsSendingEnabled).thenReturn (Boolean.TRUE);
 
       final IInboundTransactionManager aTxMgr = mock (IInboundTransactionManager.class);
       when (aTxMgr.getBySbdhInstanceID (SBDH_ID)).thenReturn (null);
@@ -186,7 +186,7 @@ final class MlsControllerTest
     try (final MockedStatic <APCoreConfig> aMockConfig = mockStatic (APCoreConfig.class);
          final MockedStatic <APJdbcMetaManager> aMockJdbc = mockStatic (APJdbcMetaManager.class))
     {
-      aMockConfig.when (APCoreConfig::isMlsSendingEnabled).thenReturn (true);
+      aMockConfig.when (APCoreConfig::isMlsSendingEnabled).thenReturn (Boolean.TRUE);
 
       final IInboundTransaction aTx = _businessDocumentTx ();
       when (aTx.getDocTypeID ()).thenReturn (EPredefinedDocumentTypeIdentifier.PEPPOL_MLS_1_0.getURIEncoded ());
@@ -197,7 +197,7 @@ final class MlsControllerTest
       aMockJdbc.when (APJdbcMetaManager::getInboundTransactionMgr).thenReturn (aTxMgr);
 
       final ResponseEntity <ReportResponse> aResp = m_aController.sendMls (_request ("AP"));
-      assertEquals (HttpStatus.UNPROCESSABLE_ENTITY, aResp.getStatusCode ());
+      assertEquals (HttpStatus.UNPROCESSABLE_CONTENT, aResp.getStatusCode ());
       assertNotNull (aResp.getBody ());
       assertEquals ("not-eligible", aResp.getBody ().getStatus ());
     }
@@ -210,7 +210,7 @@ final class MlsControllerTest
          final MockedStatic <APJdbcMetaManager> aMockJdbc = mockStatic (APJdbcMetaManager.class);
          final MockedStatic <MlsHandler> aMockHandler = mockStatic (MlsHandler.class))
     {
-      aMockConfig.when (APCoreConfig::isMlsSendingEnabled).thenReturn (true);
+      aMockConfig.when (APCoreConfig::isMlsSendingEnabled).thenReturn (Boolean.TRUE);
 
       final IInboundTransaction aTx = _businessDocumentTx ();
       when (aTx.getMlsResponseCode ()).thenReturn (EPeppolMLSResponseCode.ACCEPTANCE);
@@ -236,7 +236,7 @@ final class MlsControllerTest
          final MockedStatic <APJdbcMetaManager> aMockJdbc = mockStatic (APJdbcMetaManager.class);
          final MockedStatic <MlsHandler> aMockHandler = mockStatic (MlsHandler.class))
     {
-      aMockConfig.when (APCoreConfig::isMlsSendingEnabled).thenReturn (true);
+      aMockConfig.when (APCoreConfig::isMlsSendingEnabled).thenReturn (Boolean.TRUE);
 
       final IInboundTransaction aTx = _businessDocumentTx ();
       final IInboundTransactionManager aTxMgr = mock (IInboundTransactionManager.class);
@@ -247,8 +247,8 @@ final class MlsControllerTest
       when (aMlsTx.getID ()).thenReturn ("mls-tx-456");
       final MlsSmpFallback aFallback = new MlsSmpFallback (mock (IParticipantIdentifier.class), SBDH_ID);
       final MlsCreationResult aCreationResult = MlsCreationResult.created (EPeppolMLSResponseCode.ACCEPTANCE,
-                                                                          aMlsTx,
-                                                                          aFallback);
+                                                                           aMlsTx,
+                                                                           aFallback);
       aMockHandler.when (() -> MlsHandler.createInboundResultMls (any (), any ())).thenReturn (aCreationResult);
 
       final ResponseEntity <ReportResponse> aResp = m_aController.sendMls (_request ("AP"));
@@ -269,7 +269,7 @@ final class MlsControllerTest
          final MockedStatic <APJdbcMetaManager> aMockJdbc = mockStatic (APJdbcMetaManager.class);
          final MockedStatic <MlsHandler> aMockHandler = mockStatic (MlsHandler.class))
     {
-      aMockConfig.when (APCoreConfig::isMlsSendingEnabled).thenReturn (true);
+      aMockConfig.when (APCoreConfig::isMlsSendingEnabled).thenReturn (Boolean.TRUE);
 
       final IInboundTransaction aTx = _businessDocumentTx ();
       when (aTx.getMlsType ()).thenReturn (EPeppolMLSType.FAILURE_ONLY);
@@ -279,7 +279,7 @@ final class MlsControllerTest
       aMockJdbc.when (APJdbcMetaManager::getInboundTransactionMgr).thenReturn (aTxMgr);
 
       final MlsCreationResult aCreationResult = MlsCreationResult.suppressed (ESuccess.SUCCESS,
-                                                                             EPeppolMLSResponseCode.ACCEPTANCE);
+                                                                              EPeppolMLSResponseCode.ACCEPTANCE);
       aMockHandler.when (() -> MlsHandler.createInboundResultMls (any (), any ())).thenReturn (aCreationResult);
 
       final ResponseEntity <ReportResponse> aResp = m_aController.sendMls (_request ("AP"));
@@ -298,7 +298,7 @@ final class MlsControllerTest
          final MockedStatic <APJdbcMetaManager> aMockJdbc = mockStatic (APJdbcMetaManager.class);
          final MockedStatic <MlsHandler> aMockHandler = mockStatic (MlsHandler.class))
     {
-      aMockConfig.when (APCoreConfig::isMlsSendingEnabled).thenReturn (true);
+      aMockConfig.when (APCoreConfig::isMlsSendingEnabled).thenReturn (Boolean.TRUE);
 
       final IInboundTransaction aTx = _businessDocumentTx ();
       final IInboundTransactionManager aTxMgr = mock (IInboundTransactionManager.class);

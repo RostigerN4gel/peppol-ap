@@ -247,8 +247,8 @@ public class MlsController
                                null,
                                "disabled",
                                "MLS sending is globally disabled via '" +
-                                            APConfigurationProperties.MLS_SENDING_ENABLED +
-                                            "'");
+                                           APConfigurationProperties.MLS_SENDING_ENABLED +
+                                           "'");
     }
 
     if (StringHelper.isEmpty (aRequest.getSbdhInstanceID ()))
@@ -261,8 +261,8 @@ public class MlsController
                                null,
                                "invalid",
                                "The field 'responseCode' must be one of 'AP', 'AB' or 'RE' but is '" +
-                                            aRequest.getResponseCode () +
-                                            "'");
+                                          aRequest.getResponseCode () +
+                                          "'");
     }
 
     // Map the issues to the domain model. MLS allows line responses on a positive response code as
@@ -281,8 +281,8 @@ public class MlsController
                                    null,
                                    "invalid",
                                    "The 'statusReasonCode' of an issue must be one of 'BV', 'BW', 'FD' or 'SV' but is '" +
-                                                aIssue.getStatusReasonCode () +
-                                                "'");
+                                              aIssue.getStatusReasonCode () +
+                                              "'");
         }
 
         if (StringHelper.isEmpty (aIssue.getErrorField ()))
@@ -291,12 +291,15 @@ public class MlsController
                                    null,
                                    "invalid",
                                    "The 'errorField' of an issue is mandatory - use '" +
-                                                CPeppolMLS.LINE_ID_NOT_AVAILABLE +
-                                                "' if no location can be given");
+                                              CPeppolMLS.LINE_ID_NOT_AVAILABLE +
+                                              "' if no location can be given");
         }
 
         if (StringHelper.isEmpty (aIssue.getDescription ()))
-          return _mlsSendResponse (HttpStatus.BAD_REQUEST, null, "invalid", "The 'description' of an issue is mandatory");
+          return _mlsSendResponse (HttpStatus.BAD_REQUEST,
+                                   null,
+                                   "invalid",
+                                   "The 'description' of an issue is mandatory");
 
         aIssues.add (new MlsOutcomeIssue (aIssue.getErrorField (), eStatusReasonCode, aIssue.getDescription ()));
       }
@@ -308,8 +311,8 @@ public class MlsController
                                null,
                                "invalid",
                                "An MLS with the response code '" +
-                                            EPeppolMLSResponseCode.REJECTION.getID () +
-                                            "' requires at least one issue");
+                                          EPeppolMLSResponseCode.REJECTION.getID () +
+                                          "' requires at least one issue");
     }
 
     final IInboundTransactionManager aTxMgr = APJdbcMetaManager.getInboundTransactionMgr ();
@@ -329,7 +332,7 @@ public class MlsController
     if (CPhossAP.isMLS (aTx.getDocTypeID (), aTx.getProcessID ()) ||
         CPhossAP.isMLR (aTx.getDocTypeID (), aTx.getProcessID ()))
     {
-      return _mlsSendResponse (HttpStatus.UNPROCESSABLE_ENTITY,
+      return _mlsSendResponse (HttpStatus.UNPROCESSABLE_CONTENT,
                                aTx.getID (),
                                "not-eligible",
                                "The inbound transaction is an MLS or an MLR document and is never answered with an MLS");
@@ -342,8 +345,8 @@ public class MlsController
                                aTx.getID (),
                                "conflict",
                                "The MLS '" +
-                                            aTx.getMlsResponseCode ().getID () +
-                                            "' was already determined for this inbound transaction");
+                                           aTx.getMlsResponseCode ().getID () +
+                                           "' was already determined for this inbound transaction");
     }
 
     // A document that was forwarded although it was rejected already got its negative MLS (RE)
@@ -381,10 +384,10 @@ public class MlsController
                                aTx.getID (),
                                "recorded",
                                "The MLS '" +
-                                       eResponseCode.getID () +
-                                       "' was recorded but not sent, because the MLS type of the transaction is '" +
-                                       aTx.getMlsType ().getID () +
-                                       "'");
+                                           eResponseCode.getID () +
+                                           "' was recorded but not sent, because the MLS type of the transaction is '" +
+                                           aTx.getMlsType ().getID () +
+                                           "'");
     }
 
     // The AS4 transmission and its retries happen in the background
