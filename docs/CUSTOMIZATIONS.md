@@ -108,6 +108,41 @@ These are intrinsic to phoss-ap's architecture, not bugs:
    have **no** `<HttpRequestHeaders>` content. Business rejections are therefore marked no-retry;
    only transport errors are retried. Set `retry.forwarding.max-attempts=1` if headers must always be
    present, or persist the headers with the transaction for full retry fidelity.
+4. **Inbound MLS is `AB`, not `AP`.** See the section below.
+
+## MLS acknowledging instead of acceptance (fork-specific)
+
+`MiddlewareReceiverForwarder.isWithDeliveryConfirmation()` returns **`false`** — deliberately, even
+though the `receiver` call is synchronous.
+
+`InboundOrchestrator` (upstream, lines 504-522) picks the MLS response code for a successfully
+forwarded document from exactly that method:
+
+```java
+final MlsOutcome aOutcome = APCoreMetaManager.getForwarder ().isWithDeliveryConfirmation ()
+                            ? MlsOutcome.acceptance ()      // AP
+                            : MlsOutcome.acknowledging ();  // AB
+```
+
+**Why `false`:** the Middleware confirms that *it* accepted the document, not that the document
+reached C4. Delivery from Middleware to C4 happens afterwards, and its outcome can no longer
+influence the MLS because MLS for that message is already closed. With `true` this AP sent `AP`
+(acceptance) — a positive delivery confirmation it cannot back up, and a later Middleware→C4 failure
+became unreportable. `AB` ("accepted, delivery not confirmed") is the honest statement for a
+Middleware deployment.
+
+**Consequence for C1/C2:** they see `RECEIVED_AB` instead of `RECEIVED_AP` for documents delivered
+through this AP. This is a valid Peppol MLS response code, not a failure.
+
+**Unaffected:** the `AB` after exhausted forwarding retries (`InboundOrchestrator` 744-759) and the
+`RE` after failed inbound verification (409-423) are independent of this method and unchanged.
+
+**Not done here:** deferring the MLS until the backend reports the real C4 outcome. That is
+[FR-001](feature-requests/FR-001-api-triggered-mls-sending.md); it needs an upstream hook
+(a `mls.sending.trigger=api` switch in `InboundOrchestrator`). Emulating it fork-side would require
+`mls.sending.enabled=false` plus a ~130-line reimplementation of `MlsHandler`, which was rejected as
+a maintenance risk. This one-line change is the cheap part of that feature request and deliberately
+does not work around the missing hook.
 
 ## Build
 

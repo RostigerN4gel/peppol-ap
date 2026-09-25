@@ -149,9 +149,21 @@ public class MiddlewareReceiverForwarder implements IDocumentForwarder
   @Override
   public boolean isWithDeliveryConfirmation ()
   {
-    // The receiver call synchronously confirms whether the document was accepted by C4,
-    // so an inbound MLS may be answered with acceptance.
-    return true;
+    // FORK: deliberately false, even though the receiver call is synchronous.
+    //
+    // The Middleware acknowledges that IT accepted the document - not that the document reached C4.
+    // Delivery from the Middleware to C4 happens afterwards and its outcome can no longer influence
+    // the MLS, because MLS for that message is already closed. Returning true made
+    // InboundOrchestrator answer with MLS "AP" (acceptance), i.e. a positive delivery confirmation
+    // this AP cannot actually back up.
+    //
+    // With false, InboundOrchestrator selects MlsOutcome.acknowledging() instead, so C2/C1 receive
+    // "AB" = accepted, delivery not confirmed. That is the honest statement for a Middleware setup.
+    //
+    // Reporting the real C4 outcome would require deferring the MLS until the backend reports it;
+    // see docs/feature-requests/FR-001-api-triggered-mls-sending.md. That needs an upstream hook
+    // (InboundOrchestrator:504-522) and is intentionally NOT worked around here.
+    return false;
   }
 
   /** {@inheritDoc} */
