@@ -10,6 +10,13 @@
 # PostgreSQL (webapp context test) and Docker (Testcontainers S3 IT), which are
 # usually not available on a build box. Set RUN_TESTS=1 to include them.
 #
+# Local profile configs (phoss-ap-webapp/src/main/resources/application-*.properties,
+# git-ignored, may contain secrets) are moved aside during the build and are
+# NOT packaged: ph-config loads a baked-in application-<profile>.properties at
+# the same priority as the external one on the server and finds it first, so a
+# stale local copy would silently override the server configuration.
+# Set INCLUDE_PROFILE_CONFIG=1 to package them anyway.
+#
 
 set -e
 
@@ -21,6 +28,7 @@ REPO_ROOT=$(cd -- "$SCRIPT_DIR/.." && pwd)
 OUTPUT_DIR="${OUTPUT_DIR:-$REPO_ROOT/dist}"
 MODULE="phoss-ap-webapp"
 RUN_TESTS="${RUN_TESTS:-0}"
+INCLUDE_PROFILE_CONFIG="${INCLUDE_PROFILE_CONFIG:-0}"
 MVN="${MVN:-mvn}"
 
 # --- Resolve Maven ----------------------------------------------------------
@@ -62,8 +70,39 @@ else
 fi
 
 cd "$REPO_ROOT"
+
+# --- Keep local profile configs out of the jar ------------------------------
+RES_DIR="$REPO_ROOT/$MODULE/src/main/resources"
+STASH_DIR=""
+restore_profile_config() {
+  if [ -n "$STASH_DIR" ] && [ -d "$STASH_DIR" ]; then
+    for f in "$STASH_DIR"/application-*.properties; do
+      [ -f "$f" ] || continue
+      mv -f "$f" "$RES_DIR/"
+    done
+    rmdir "$STASH_DIR" 2>/dev/null || true
+    STASH_DIR=""
+  fi
+}
+
+if [ "$INCLUDE_PROFILE_CONFIG" != "1" ]; then
+  for f in "$RES_DIR"/application-*.properties; do
+    [ -f "$f" ] || continue
+    if [ -z "$STASH_DIR" ]; then
+      STASH_DIR=$(mktemp -d)
+      # Restore on success, failure and Ctrl+C
+      trap restore_profile_config EXIT
+      trap 'restore_profile_config; exit 130' INT TERM
+    fi
+    echo "Not packaging : $(basename "$f")"
+    mv "$f" "$STASH_DIR/"
+  done
+fi
+
 # shellcheck disable=SC2086
 "$MVN" -B -pl "$MODULE" -am clean package $TEST_ARGS
+
+restore_profile_config
 
 # --- Locate and export the fat jar ------------------------------------------
 TARGET_DIR="$REPO_ROOT/$MODULE/target"

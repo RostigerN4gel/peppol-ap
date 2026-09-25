@@ -74,10 +74,13 @@ There are **two** configuration systems, both fed from the same properties files
 **Profile-specific config:** `SpringProfileConfigIntegration` bridges Spring profiles into ph-config.
 Activating profile `dev` (`--spring.profiles.active=dev`) loads **`application-dev.properties`** in
 addition to `application.properties`. The filename convention is `application-<profile>.properties`
-(resolved by `ConfigFactory.addProfilePropertiesSources` in ph-config). `application-dev.properties`
-lives in `phoss-ap-webapp/src/main/resources/`, is **git-ignored** (contains secrets), and is **baked
-into the jar** at build time — so changing it requires a rebuild. `application.properties` is the
-committed template with `[CHANGEME]` markers.
+(resolved by `ConfigFactory.addProfilePropertiesSources` in ph-config), from the classpath **and**
+from the working directory — both at priority 185, the classpath copy is consulted first and
+**wins**. A local `application-dev.properties` may live in `phoss-ap-webapp/src/main/resources/`
+(**git-ignored**, contains secrets), but `build-phoss-ap.sh` deliberately does **not** package it:
+a stale baked-in copy once silently overrode the server config. On the server the file lives in
+`$APP_HOME` and is changed without a rebuild. `application.properties` is the committed template
+with `[CHANGEME]` markers.
 
 ## Persistence
 
@@ -115,7 +118,7 @@ answered by a `ProcessResult` XML). See [CUSTOMIZATIONS.md](docs/CUSTOMIZATIONS.
   Linux `/opt/peppol-ap` daemon (`APP_HOME`) whose unit is named `phoss-ap` (`SERVICE_NAME`),
   running as `ec2-user`. See
   [CUSTOMIZATIONS.md](docs/CUSTOMIZATIONS.md#deployment-helper-scripts-fork-specific).
-- `dist/` receives the exported jar from `build-phoss-ap.sh`. The jar embeds `application-dev.properties`
-  secrets — do not commit `dist/`.
+- `dist/` receives the exported jar from `build-phoss-ap.sh` (without the local profile configs,
+  unless `INCLUDE_PROFILE_CONFIG=1`) — do not commit `dist/`.
 - Commit messages / PRs: this is a fork; keep upstream-mergeable changes minimal and isolate fork
   changes where practical.

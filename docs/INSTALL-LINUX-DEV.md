@@ -291,15 +291,19 @@ Higher number wins. Verified against ph-config 12.3.3:
 | 300 | OS environment variables (`PHOSSAP_JDBC_URL=...`) | key uppercased, `.` and `-` → `_` |
 | 200 | `-Dconfig.file=/path/file.properties` (also `config.url`, `config.resource`) | **filesystem**, no rebuild needed |
 | 190 | `private-application.properties` | classpath |
-| 185 | `application-<profile>.properties` | classpath, loaded per active Spring profile |
+| 185 | `application-<profile>.properties` | classpath **and** working directory, loaded per active Spring profile — the classpath copy is consulted first and wins |
 | 180 | `application.properties` | classpath |
 | 1 | `reference.properties` | library defaults |
 
 Two consequences that trip people up:
 
-- `application.properties`, `private-application.properties` and `application-<profile>.properties`
-  are resolved on the **classpath only** — inside a fat jar that means *baked in at build time*.
-  Dropping such a file next to the jar has **no** effect on ph-config.
+- `application.properties` and `private-application.properties` are resolved on the **classpath
+  only** — inside a fat jar that means *baked in at build time*. Dropping such a file next to the
+  jar has **no** effect on ph-config.
+- `application-<profile>.properties` is additionally read from the **working directory** (for the
+  systemd unit: `$APP_HOME`). A copy baked into the jar has the same priority and **wins**, so
+  `build-phoss-ap.sh` deliberately does not package the local profile files (see
+  [6](#6-build)); set `INCLUDE_PROFILE_CONFIG=1` to package them anyway.
 - To change ph-config values **without rebuilding**, use `-Dconfig.file=...`, environment variables
   or `-D` system properties. *Spring Boot* keys (e.g. `server.port`) are unaffected by
   `config.file` — Spring does read an `application.properties` from the working directory, or use
@@ -309,11 +313,14 @@ Two consequences that trip people up:
 
 [SpringProfileConfigIntegration.java](../phoss-ap-webapp/src/main/java/com/helger/phoss/ap/webapp/config/SpringProfileConfigIntegration.java)
 bridges the active Spring profiles into ph-config: starting with `--spring.profiles.active=dev`
-additionally loads **`application-dev.properties`** from the classpath.
+additionally loads **`application-dev.properties`** from the classpath and from the working
+directory.
 
 `application-dev.properties` and `application-prod.properties` are **git-ignored** (they hold
-secrets) and live in `phoss-ap-webapp/src/main/resources/`. They are baked into the jar, so
-**changing them requires a rebuild**.
+secrets) and may live in `phoss-ap-webapp/src/main/resources/` for local runs from the IDE.
+`build-phoss-ap.sh` does **not** package them: on a server, put the file into `$APP_HOME`
+(the working directory of the unit), where it can be changed **without a rebuild** — a restart is
+enough.
 
 ### 5.4 Write the dev configuration
 
@@ -397,7 +404,9 @@ JAVA_HOME="$JAVA_HOME" ./helper/build-phoss-ap.sh
 
 [build-phoss-ap.sh](../helper/build-phoss-ap.sh) verifies that Maven and a JDK 21+ are present,
 runs `mvn -B -pl phoss-ap-webapp -am clean package -DskipTests` and copies the resulting fat jar to
-`dist/`. Overridable: `OUTPUT_DIR`, `RUN_TESTS=1`, `MVN`.
+`dist/`. Local profile configs (`src/main/resources/application-*.properties`) are moved aside
+during the build and restored afterwards, so they never end up in the jar. Overridable:
+`OUTPUT_DIR`, `RUN_TESTS=1`, `MVN`, `INCLUDE_PROFILE_CONFIG=1`.
 
 The plain Maven equivalents:
 
@@ -462,7 +471,7 @@ java -Dphossap.internal.skip-peppol-certificate-check=true \
 ```
 
 Startup is complete when the log shows the Tomcat port and the phase4 servlet registration.
-`Ctrl+C` stops it. Useful ad-hoc overrides (they beat the baked-in file, see
+`Ctrl+C` stops it. Useful ad-hoc overrides (they beat the profile files, see
 [5.2](#52-precedence-ph-config)):
 
 ```sh
@@ -671,8 +680,8 @@ sudo PURGE=1 ./helper/uninstall-phoss-ap-daemon.sh        # drop $APP_HOME entir
 
 ## 10. Redeploy after a change
 
-`application-dev.properties` is baked into the jar, so config changes need the same cycle as code
-changes:
+A configuration change in `$APP_HOME/application-dev.properties` only needs a restart. Code changes
+need a rebuild:
 
 ```sh
 cd ~/git/peppol-ap
