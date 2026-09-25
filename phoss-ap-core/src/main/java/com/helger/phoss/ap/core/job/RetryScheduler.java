@@ -17,6 +17,7 @@
 package com.helger.phoss.ap.core.job;
 
 import java.time.Duration;
+import java.time.OffsetDateTime;
 import java.util.Timer;
 import java.util.TimerTask;
 
@@ -27,15 +28,22 @@ import com.helger.annotation.Nonnegative;
 import com.helger.base.exception.InitializationException;
 import com.helger.base.timing.StopWatch;
 import com.helger.collection.commons.ICommonsList;
+import com.helger.peppol.mls.EPeppolMLSResponseCode;
+import com.helger.peppol.sbdh.EPeppolMLSType;
+import com.helger.phoss.ap.api.codelist.EInboundStatus;
+import com.helger.phoss.ap.api.codelist.EMlsSendingTrigger;
 import com.helger.phoss.ap.api.model.IInboundTransaction;
 import com.helger.phoss.ap.api.model.IOutboundTransaction;
+import com.helger.phoss.ap.api.model.MlsOutcome;
 import com.helger.phoss.ap.api.otel.CPhossAPOtel;
 import com.helger.telemetry.Telemetry;
 import com.helger.telemetry.ETelemetrySpanKind;
 import com.helger.telemetry.ITelemetrySpan;
+import com.helger.phoss.ap.basic.APBasicMetaManager;
 import com.helger.phoss.ap.core.APCoreConfig;
 import com.helger.phoss.ap.core.APCoreMetaManager;
 import com.helger.phoss.ap.core.inbound.InboundOrchestrator;
+import com.helger.phoss.ap.core.mls.MlsHandler;
 import com.helger.phoss.ap.core.outbound.OutboundOrchestrator;
 import com.helger.phoss.ap.db.APJdbcMetaManager;
 
@@ -117,6 +125,64 @@ public final class RetryScheduler
       aHandler.onRetrySchedulerCycle (true, nProcessed, aCycleDuration);
   }
 
+  private static void _retryDeferredVerification (@Nonnegative final int nBatchSize)
+  {
+    final var aInboundMgr = APJdbcMetaManager.getInboundTransactionMgr ();
+    int nProcessed = 0;
+
+    // Note: deliberately no "onRetrySchedulerCycle" callback - that SPI method only distinguishes
+    // inbound from outbound, and the re-verification is neither of the two existing cycles
+    try (final ITelemetrySpan aSpan = Telemetry.startSpan (CPhossAPOtel.SPAN_SCHEDULER_CYCLE,
+                                                           ETelemetrySpanKind.INTERNAL)
+                                               .setAttribute (CPhossAPOtel.ATTR_SCHEDULER_NAME, "reverify")
+                                               .setAttribute (CPhossAPOtel.ATTR_IS_OUTBOUND, false))
+    {
+      try
+      {
+        final ICommonsList <IInboundTransaction> aTransactions = aInboundMgr.getAllForVerificationRetry (nBatchSize);
+
+        if (aTransactions.isNotEmpty ())
+        {
+          LOGGER.info ("Re-verifying " + aTransactions.size () + " inbound transactions");
+          final String sLogPrefix = "[RetryVerification] ";
+
+          for (final IInboundTransaction aInboundTx : aTransactions)
+          {
+            nProcessed++;
+            if (InboundOrchestrator.resumeDeferredInboundDocument (sLogPrefix, aInboundTx).isFailure ())
+            {
+              // A still unavailable verifier is not a forwarding error, so the notification
+              // handlers are only called, if the document left the deferred state
+              final IInboundTransaction aUpdatedTx = aInboundMgr.getByID (aInboundTx.getID ());
+              if (aUpdatedTx != null && aUpdatedTx.getStatus () != EInboundStatus.VERIFICATION_DEFERRED)
+                for (final var aHandler : APCoreMetaManager.getAllNotificationHandlers ())
+                  aHandler.onInboundForwardingError (aInboundTx.getID (), true);
+            }
+          }
+        }
+        else
+        {
+          if (LOGGER.isDebugEnabled ())
+            LOGGER.debug ("Found no inbound transactions for re-verification");
+        }
+      }
+      catch (final Exception ex)
+      {
+        LOGGER.error ("Internal error in inbound re-verification cycle", ex);
+        aSpan.recordException (ex).setStatusError (ex.getMessage ());
+
+        for (final var aHandler : APCoreMetaManager.getAllNotificationHandlers ())
+          aHandler.onUnexpectedException ("RetryScheduler._retryDeferredVerification",
+                                          "Internal error in inbound re-verification cycle",
+                                          ex);
+      }
+      finally
+      {
+        aSpan.setAttribute (CPhossAPOtel.ATTR_SCHEDULER_ITEMS, nProcessed);
+      }
+    }
+  }
+
   private static void _retryInbound (@Nonnegative final int nBatchSize)
   {
     final var aInboundMgr = APJdbcMetaManager.getInboundTransactionMgr ();
@@ -173,6 +239,118 @@ public final class RetryScheduler
   }
 
   /**
+   * The MLS watchdog of the trigger mode {@link EMlsSendingTrigger#API}: answer C2 on behalf of a
+   * Receiver Backend that did not report the outcome of a successfully forwarded document within
+   * {@code mls.sending.api.timeout}. Without it a silent backend would push this AP out of the
+   * MLS-1 compliance of the Peppol Network Policy - 99.5 % of all MLS responses within 20 minutes.
+   * <p>
+   * The timeout is measured from the reception of the document, because that is where the MLS-1
+   * clock starts. A forwarding that itself took a long time therefore shortens the window of the
+   * backend instead of extending the SLA budget - in the extreme case the fallback goes out with
+   * the first cycle after the forwarding, which is the correct answer when there is no budget left.
+   * </p>
+   *
+   * @param nBatchSize
+   *        The maximum number of transactions to answer per cycle. Must be &gt; 0.
+   * @since 0.13.0
+   */
+  private static void _sendMlsAfterApiTimeout (@Nonnegative final int nBatchSize)
+  {
+    // Only the trigger mode "api" defers an MLS at all
+    if (APCoreConfig.getMlsSendingTrigger () != EMlsSendingTrigger.API)
+      return;
+
+    // Nothing to answer if MLS sending is globally disabled
+    if (!APCoreConfig.isMlsSendingEnabled ())
+      return;
+
+    final var aInboundMgr = APJdbcMetaManager.getInboundTransactionMgr ();
+    int nProcessed = 0;
+
+    // Note: deliberately no "onRetrySchedulerCycle" callback - that SPI method only distinguishes
+    // inbound from outbound, and the MLS fallback is neither of the two existing cycles
+    try (final ITelemetrySpan aSpan = Telemetry.startSpan (CPhossAPOtel.SPAN_SCHEDULER_CYCLE,
+                                                           ETelemetrySpanKind.INTERNAL)
+                                               .setAttribute (CPhossAPOtel.ATTR_SCHEDULER_NAME, "mls-fallback")
+                                               .setAttribute (CPhossAPOtel.ATTR_IS_OUTBOUND, false))
+    {
+      try
+      {
+        final Duration aTimeout = APCoreConfig.getMlsSendingApiTimeout ();
+        final OffsetDateTime aMaxAS4Timestamp = APBasicMetaManager.getTimestampMgr ()
+                                                                  .getCurrentDateTimeUTC ()
+                                                                  .minus (aTimeout);
+        final ICommonsList <IInboundTransaction> aTransactions = aInboundMgr.getAllForMlsApiTimeout (nBatchSize,
+                                                                                                     aMaxAS4Timestamp);
+
+        if (aTransactions.isNotEmpty ())
+        {
+          final EPeppolMLSResponseCode eResponseCode = APCoreConfig.getMlsSendingApiTimeoutResponseCode ();
+          LOGGER.info ("Sending the fallback MLS (" +
+                       eResponseCode.getID () +
+                       ") for " +
+                       aTransactions.size () +
+                       " inbound transactions, because no MLS status was reported within " +
+                       aTimeout);
+
+          final String sResponseText = "No MLS status was reported by the Receiver Backend within " + aTimeout;
+          final MlsOutcome aOutcome = eResponseCode == EPeppolMLSResponseCode.ACCEPTANCE ? MlsOutcome.acceptance ()
+                                                                                         : MlsOutcome.acknowledging (sResponseText);
+
+          for (final IInboundTransaction aInboundTx : aTransactions)
+          {
+            // The DB query already excludes them, but a custom manager implementation might not
+            if (InboundOrchestrator.isMlsSuppressedAfterRejection (aInboundTx))
+              continue;
+
+            // A FAILURE_ONLY transaction never gets a positive MLS, so recording a fallback
+            // response code for it would only block the rejection the backend may still report
+            if (aInboundTx.getMlsType () == EPeppolMLSType.FAILURE_ONLY)
+              continue;
+
+            nProcessed++;
+            try
+            {
+              MlsHandler.triggerSendingInboundResultMls (aInboundTx, aOutcome);
+            }
+            catch (final Exception ex)
+            {
+              LOGGER.error ("Error sending the fallback MLS for inbound transaction '" + aInboundTx.getID () + "'",
+                            ex);
+
+              for (final var aHandler : APCoreMetaManager.getAllNotificationHandlers ())
+                aHandler.onUnexpectedException ("RetryScheduler._sendMlsAfterApiTimeout",
+                                                "Error sending the fallback MLS for inbound transaction '" +
+                                                                                          aInboundTx.getID () +
+                                                                                          "'",
+                                                ex);
+            }
+          }
+        }
+        else
+        {
+          if (LOGGER.isDebugEnabled ())
+            LOGGER.debug ("Found no inbound transactions waiting for an API triggered MLS");
+        }
+      }
+      catch (final Exception ex)
+      {
+        LOGGER.error ("Internal error in MLS fallback cycle", ex);
+        aSpan.recordException (ex).setStatusError (ex.getMessage ());
+
+        for (final var aHandler : APCoreMetaManager.getAllNotificationHandlers ())
+          aHandler.onUnexpectedException ("RetryScheduler._sendMlsAfterApiTimeout",
+                                          "Internal error in MLS fallback cycle",
+                                          ex);
+      }
+      finally
+      {
+        aSpan.setAttribute (CPhossAPOtel.ATTR_SCHEDULER_ITEMS, nProcessed);
+      }
+    }
+  }
+
+  /**
    * Start the retry scheduler. It periodically checks for outbound and inbound transactions that
    * are eligible for retry and processes them.
    */
@@ -194,6 +372,8 @@ public final class RetryScheduler
       {
         _retryOutbound (nBatchSize);
         _retryInbound (nBatchSize);
+        _retryDeferredVerification (nBatchSize);
+        _sendMlsAfterApiTimeout (nBatchSize);
       }
     }, nIntervalMs, nIntervalMs);
   }

@@ -29,6 +29,7 @@ import com.helger.base.string.StringHelper;
 import com.helger.peppolid.factory.IIdentifierFactory;
 import com.helger.peppolid.factory.PeppolIdentifierFactory;
 import com.helger.peppolid.factory.PeppolLaxIdentifierFactory;
+import com.helger.peppolid.peppol.enduser.PeppolEndUserHelper;
 import com.helger.phoss.ap.api.config.APConfigurationProperties;
 import com.helger.phoss.ap.api.datetime.IAPTimestampManager;
 import com.helger.phoss.ap.api.mgr.IDocumentPayloadManager;
@@ -89,6 +90,10 @@ public final class APBasicMetaManager extends AbstractGlobalSingleton
           yield PeppolLaxIdentifierFactory.INSTANCE;
         }
       };
+
+      // Use the same identifier factory for the Peppol Reporting End User ID determination, so
+      // that identifiers accepted by this AP are unified and mapped the same way
+      PeppolEndUserHelper.setIdentifierFactory (m_aIdentifierFactory);
 
       m_aTimestampMgr = new APTimestampManager ();
 

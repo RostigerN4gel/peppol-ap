@@ -108,7 +108,7 @@ public class BulkRunner
         }
       }
 
-      final CompletableFuture <SendResult> aFuture = CompletableFuture.supplyAsync ( () -> {
+      final CompletableFuture <SendResult> aFuture = CompletableFuture.supplyAsync (() -> {
         final SendResult aResult = aScenario.execute (m_aSender, nIteration);
         final int nDone = aCompletedCount.incrementAndGet ();
         if (nDone % 10 == 0 || nDone == nTotal)

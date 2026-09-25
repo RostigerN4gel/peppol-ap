@@ -102,7 +102,7 @@ public class EmbeddedSftpServer
 
     // Password authentication
     final PasswordAuthenticator aAuthenticator = (sUsername, sPassword, aSession) -> m_sUser.equals (sUsername) &&
-      m_sPassword.equals (sPassword);
+                                                                                     m_sPassword.equals (sPassword);
     m_aSshd.setPasswordAuthenticator (aAuthenticator);
 
     // SFTP subsystem
@@ -122,7 +122,7 @@ public class EmbeddedSftpServer
 
     // Start a background watcher for new files
     m_bRunning = true;
-    m_aWatcherThread = new Thread ( () -> _watchDirectory (aSftpRoot), "sftp-file-watcher");
+    m_aWatcherThread = new Thread (() -> _watchDirectory (aSftpRoot), "sftp-file-watcher");
     m_aWatcherThread.setDaemon (true);
     m_aWatcherThread.start ();
   }

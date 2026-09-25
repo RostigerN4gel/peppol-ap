@@ -28,18 +28,37 @@ LABEL org.opencontainers.image.description="Open-source Peppol Access Point base
 LABEL org.opencontainers.image.url="https://github.com/phax/phoss-ap"
 LABEL org.opencontainers.image.version="${VERSION}"
 
-VOLUME /tmp
-VOLUME /var/phoss-ap/data
-
 # Directory for external extension jars (custom DB drivers, SPI extensions).
 # Any jar placed here is added to the classpath at runtime via LOADER_PATH below,
 # without rebuilding the application jar. It is a plain directory (not a VOLUME) so it
 # works both when bind-mounted from the host and when extensions are baked into a
 # derived image via "COPY my-extension.jar /ext/". See phoss-ap-extension-demo.
-RUN mkdir -p /ext
+#
+# Both directories are group owned by GID 0 with the group permissions mirroring the
+# owner permissions, so the image also runs as an arbitrary non-root UID - Kubernetes
+# with a "restricted" PodSecurity profile (runAsNonRoot / runAsUser) and OpenShift both
+# assign a random UID but keep GID 0. This must happen before the VOLUME instructions,
+# because changes to a volume path made after its VOLUME line are discarded.
+RUN mkdir -p /ext /var/phoss-ap/data && \
+    chgrp -R 0 /ext /var/phoss-ap/data && \
+    chmod -R g=u /ext /var/phoss-ap/data
+
+VOLUME /tmp
+VOLUME /var/phoss-ap/data
+
 ENV LOADER_PATH=/ext
 
-ADD https://github.com/phax/phoss-ap/releases/download/phoss-ap-parent-pom-${VERSION}/phoss-ap-webapp-${VERSION}.jar /app.jar
+# Store all runtime data below the /var/phoss-ap/data volume declared above. Without
+# this, the "global.datapath=generated/" default of the bundled application.properties
+# is resolved relative to the working directory "/", so documents and AS4 dumps end up
+# in the ephemeral /generated - unwritable for a non-root UID, and lost on container
+# removal even for root.
+ENV GLOBAL_DATAPATH=/var/phoss-ap/data/
+
+# "--chmod" requires BuildKit (default since Docker 23; the release build uses buildx).
+# Without it, files added from a remote URL get mode 0600 root:root, which a non-root
+# UID cannot read - see https://github.com/phax/phoss-ap/issues/79
+ADD --chmod=0444 https://github.com/phax/phoss-ap/releases/download/phoss-ap-parent-pom-${VERSION}/phoss-ap-webapp-${VERSION}.jar /app.jar
 
 EXPOSE 8080
 

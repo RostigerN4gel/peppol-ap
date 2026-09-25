@@ -33,13 +33,17 @@ import com.helger.collection.commons.CommonsLinkedHashSet;
 import com.helger.collection.commons.ICommonsOrderedSet;
 import com.helger.config.fallback.IConfigWithFallback;
 import com.helger.config.value.parser.ConfigDurationParser;
+import com.helger.peppol.mls.EPeppolMLSResponseCode;
 import com.helger.peppol.sbdh.EPeppolMLSType;
 import com.helger.peppol.servicedomain.EPeppolNetwork;
 import com.helger.phoss.ap.api.CPhossAP;
 import com.helger.phoss.ap.api.codelist.EAS4DumpMode;
 import com.helger.phoss.ap.api.codelist.EC4CountryCodeMode;
 import com.helger.phoss.ap.api.codelist.EDuplicateDetectionMode;
+import com.helger.phoss.ap.api.codelist.EMlsSendingTrigger;
 import com.helger.phoss.ap.api.codelist.EReceiverCheckMode;
+import com.helger.phoss.ap.api.codelist.EVerificationFailMode;
+import com.helger.phoss.ap.api.codelist.EVerificationRejectionForwarding;
 import com.helger.phoss.ap.api.config.APConfigProvider;
 import com.helger.phoss.ap.api.config.APConfigurationProperties;
 
@@ -59,6 +63,7 @@ public final class APCoreConfig
   // Remember the legacy keys for which a deprecation warning was already logged, so it is emitted
   // only once per key
   private static final Set <String> WARNED_DEPRECATED_KEYS = ConcurrentHashMap.newKeySet ();
+  private static final Set <String> WARNED_INVALID_VALUES = ConcurrentHashMap.newKeySet ();
 
   private APCoreConfig ()
   {}
@@ -67,6 +72,47 @@ public final class APCoreConfig
   private static IConfigWithFallback _getConfig ()
   {
     return APConfigProvider.getConfig ();
+  }
+
+  /**
+   * Resolve a duration-typed configuration value. The key accepts compound expressions like
+   * <code>10s</code>, <code>5m</code>, <code>2d 5h 30m</code>. If the key is missing, blank, or
+   * fails to parse, the supplied default is returned.
+   *
+   * @param sDurationKey
+   *        The duration-grammar configuration key (e.g. <code>"peppol.smp.cache.ttl"</code>).
+   * @param aDefault
+   *        The default value if the key is not configured.
+   * @return The resolved duration. Never <code>null</code>.
+   * @since 0.11.0
+   */
+  @NonNull
+  private static Duration _getDuration (@NonNull final String sDurationKey, @NonNull final Duration aDefault)
+  {
+    final Duration aDuration = _getConfig ().getAsConfigDuration (sDurationKey,
+                                                                  sErr -> LOGGER.warn ("Failed to parse configuration key '" +
+                                                                                       sDurationKey +
+                                                                                       "' as duration: " +
+                                                                                       sErr));
+    return aDuration != null ? aDuration : aDefault;
+  }
+
+  /**
+   * Resolve an optional duration-typed configuration value.
+   *
+   * @param sDurationKey
+   *        The duration-grammar configuration key.
+   * @return <code>null</code> if the key is not configured or cannot be parsed.
+   * @since 0.13.0
+   */
+  @Nullable
+  private static Duration _getDurationOrNull (@NonNull final String sDurationKey)
+  {
+    return _getConfig ().getAsConfigDuration (sDurationKey,
+                                              sErr -> LOGGER.warn ("Failed to parse configuration key '" +
+                                                                   sDurationKey +
+                                                                   "' as duration: " +
+                                                                   sErr));
   }
 
   /**
@@ -243,6 +289,62 @@ public final class APCoreConfig
   {
     return _getConfig ().getAsBoolean (APConfigurationProperties.PEPPOL_REVOCATION_SOFT_FAIL,
                                        APConfigurationProperties.PEPPOL_REVOCATION_SOFT_FAIL_DEFAULT);
+  }
+
+  /**
+   * @return {@code true} if the in-memory caching of Peppol SMP Service Group and Service Metadata
+   *         responses is enabled. Default is
+   *         {@link APConfigurationProperties#PEPPOL_SMP_CACHE_ENABLED_DEFAULT}.
+   * @since 0.11.0
+   */
+  public static boolean isPeppolSmpCacheEnabled ()
+  {
+    return _getConfig ().getAsBoolean (APConfigurationProperties.PEPPOL_SMP_CACHE_ENABLED,
+                                       APConfigurationProperties.PEPPOL_SMP_CACHE_ENABLED_DEFAULT);
+  }
+
+  /**
+   * @return The time to live of each Peppol SMP client cache entry. Never <code>null</code>.
+   * @since 0.11.0
+   */
+  @NonNull
+  public static Duration getPeppolSmpCacheTTL ()
+  {
+    return _getDuration (APConfigurationProperties.PEPPOL_SMP_CACHE_TTL,
+                         APConfigurationProperties.PEPPOL_SMP_CACHE_TTL_DEFAULT);
+  }
+
+  /**
+   * @return The maximum number of entries of each of the two internal Peppol SMP client caches
+   *         (Service Group and Service Metadata). All values &le; 0 indicate an unlimited size.
+   * @since 0.11.0
+   */
+  public static int getPeppolSmpCacheMaxSize ()
+  {
+    return _getConfig ().getAsInt (APConfigurationProperties.PEPPOL_SMP_CACHE_MAX_SIZE,
+                                   APConfigurationProperties.PEPPOL_SMP_CACHE_MAX_SIZE_DEFAULT);
+  }
+
+  /**
+   * @return The connect timeout for all SMP queries. Never <code>null</code>.
+   * @since 0.13.0
+   */
+  @NonNull
+  public static Duration getPeppolSmpTimeoutConnect ()
+  {
+    return _getDuration (APConfigurationProperties.PEPPOL_SMP_TIMEOUT_CONNECT,
+                         APConfigurationProperties.PEPPOL_SMP_TIMEOUT_CONNECT_DEFAULT);
+  }
+
+  /**
+   * @return The response (read) timeout for all SMP queries. Never <code>null</code>.
+   * @since 0.13.0
+   */
+  @NonNull
+  public static Duration getPeppolSmpTimeoutResponse ()
+  {
+    return _getDuration (APConfigurationProperties.PEPPOL_SMP_TIMEOUT_RESPONSE,
+                         APConfigurationProperties.PEPPOL_SMP_TIMEOUT_RESPONSE_DEFAULT);
   }
 
   /**
@@ -511,6 +613,53 @@ public final class APCoreConfig
   }
 
   /**
+   * @return The maximum age of a transaction for which a rejection by a circuit breaker is deferred
+   *         without consuming a retry attempt. Never <code>null</code>.
+   * @since 0.13.0
+   */
+  @NonNull
+  public static Duration getCircuitBreakerDeferMaxDuration ()
+  {
+    return _getDuration (APConfigurationProperties.CIRCUIT_BREAKER_DEFER_MAX_DURATION,
+                         APConfigurationProperties.CIRCUIT_BREAKER_DEFER_MAX_DURATION_DEFAULT);
+  }
+
+  /**
+   * @return The number of executions the circuit breaker failure threshold is measured over.
+   *         {@code 0} means the failures must be consecutive.
+   * @since 0.13.0
+   */
+  @Nonnegative
+  public static int getCircuitBreakerFailureExecutions ()
+  {
+    return _getConfig ().getAsInt (APConfigurationProperties.CIRCUIT_BREAKER_FAILURE_EXECUTIONS,
+                                   APConfigurationProperties.CIRCUIT_BREAKER_FAILURE_EXECUTIONS_DEFAULT);
+  }
+
+  /**
+   * @return The rolling time window the circuit breaker failure threshold is measured over. May be
+   *         <code>null</code>, meaning that no time based thresholding is used.
+   * @since 0.13.0
+   */
+  @Nullable
+  public static Duration getCircuitBreakerFailurePeriod ()
+  {
+    return _getDurationOrNull (APConfigurationProperties.CIRCUIT_BREAKER_FAILURE_PERIOD);
+  }
+
+  /**
+   * @return The failure rate in percent at which the circuit breaker opens. {@code 0} means that
+   *         the absolute failure threshold is used instead.
+   * @since 0.13.0
+   */
+  @Nonnegative
+  public static int getCircuitBreakerFailureRate ()
+  {
+    return _getConfig ().getAsInt (APConfigurationProperties.CIRCUIT_BREAKER_FAILURE_RATE,
+                                   APConfigurationProperties.CIRCUIT_BREAKER_FAILURE_RATE_DEFAULT);
+  }
+
+  /**
    * @return {@code true} if the outbound S3 submission endpoint is enabled.
    * @since v0.1.1
    */
@@ -604,6 +753,85 @@ public final class APCoreConfig
   }
 
   /**
+   * @return The configured behaviour for the case that a document verifier backend service is
+   *         unavailable. Defaults to {@link EVerificationFailMode#DEFAULT}. Never
+   *         <code>null</code>.
+   * @since 0.12.0
+   */
+  @NonNull
+  public static EVerificationFailMode getVerificationFailMode ()
+  {
+    final String sVal = _getConfig ().getAsString (APConfigurationProperties.VERIFICATION_FAIL_MODE);
+    if (StringHelper.isEmpty (sVal))
+      return EVerificationFailMode.DEFAULT;
+
+    final EVerificationFailMode eRet = EVerificationFailMode.getFromIDOrNull (sVal);
+    if (eRet != null)
+      return eRet;
+
+    if (WARNED_INVALID_VALUES.add (APConfigurationProperties.VERIFICATION_FAIL_MODE))
+      LOGGER.warn ("The configuration key '" +
+                   APConfigurationProperties.VERIFICATION_FAIL_MODE +
+                   "' has the unsupported value '" +
+                   sVal +
+                   "' - falling back to '" +
+                   EVerificationFailMode.DEFAULT.getID () +
+                   "'");
+    return EVerificationFailMode.DEFAULT;
+  }
+
+  /**
+   * @return The configured behaviour for an inbound document that did not pass the verification.
+   *         Defaults to {@link EVerificationRejectionForwarding#DEFAULT}. Never <code>null</code>.
+   * @since 0.12.0
+   */
+  @NonNull
+  public static EVerificationRejectionForwarding getVerificationRejectionForwarding ()
+  {
+    final String sVal = _getConfig ().getAsString (APConfigurationProperties.VERIFICATION_INBOUND_REJECTION_FORWARDING);
+    if (StringHelper.isEmpty (sVal))
+      return EVerificationRejectionForwarding.DEFAULT;
+
+    final EVerificationRejectionForwarding eRet = EVerificationRejectionForwarding.getFromIDOrNull (sVal);
+    if (eRet != null)
+      return eRet;
+
+    if (WARNED_INVALID_VALUES.add (APConfigurationProperties.VERIFICATION_INBOUND_REJECTION_FORWARDING))
+      LOGGER.warn ("The configuration key '" +
+                   APConfigurationProperties.VERIFICATION_INBOUND_REJECTION_FORWARDING +
+                   "' has the unsupported value '" +
+                   sVal +
+                   "' - falling back to '" +
+                   EVerificationRejectionForwarding.DEFAULT.getID () +
+                   "'");
+    return EVerificationRejectionForwarding.DEFAULT;
+  }
+
+  /**
+   * @return The interval in which a deferred verification is retried. Never <code>null</code>.
+   * @since 0.12.0
+   */
+  @NonNull
+  public static Duration getVerificationDeferredRetryInterval ()
+  {
+    return _getDuration (APConfigurationProperties.VERIFICATION_DEFERRED_RETRY_INTERVAL,
+                         APConfigurationProperties.VERIFICATION_DEFERRED_RETRY_INTERVAL_DEFAULT);
+  }
+
+  /**
+   * @return The maximum duration, relative to the reception of a document, for which the
+   *         verification may be deferred. Afterwards the document is rejected. Never
+   *         <code>null</code>.
+   * @since 0.12.0
+   */
+  @NonNull
+  public static Duration getVerificationDeferredMaxDuration ()
+  {
+    return _getDuration (APConfigurationProperties.VERIFICATION_DEFERRED_MAX_DURATION,
+                         APConfigurationProperties.VERIFICATION_DEFERRED_MAX_DURATION_DEFAULT);
+  }
+
+  /**
    * @return {@code true} if MLS sending is globally enabled. Defaults to {@code true}.
    * @since v0.1.2
    */
@@ -623,6 +851,93 @@ public final class APCoreConfig
     final String sVal = _getConfig ().getAsString (APConfigurationProperties.MLS_TYPE);
     final EPeppolMLSType eRet = EPeppolMLSType.getFromIDOrNull (sVal);
     return eRet != null ? eRet : EPeppolMLSType.ALWAYS_SEND;
+  }
+
+  /**
+   * @return The configured trigger of the positive MLS of a successfully forwarded document.
+   *         Defaults to {@link EMlsSendingTrigger#AUTO}. Never <code>null</code>.
+   * @since 0.13.0
+   */
+  @NonNull
+  public static EMlsSendingTrigger getMlsSendingTrigger ()
+  {
+    final String sVal = _getConfig ().getAsString (APConfigurationProperties.MLS_SENDING_TRIGGER);
+    if (StringHelper.isEmpty (sVal))
+      return EMlsSendingTrigger.DEFAULT;
+
+    final EMlsSendingTrigger eRet = EMlsSendingTrigger.getFromIDOrNull (sVal);
+    if (eRet != null)
+      return eRet;
+
+    if (WARNED_INVALID_VALUES.add (APConfigurationProperties.MLS_SENDING_TRIGGER))
+      LOGGER.warn ("The configuration key '" +
+                   APConfigurationProperties.MLS_SENDING_TRIGGER +
+                   "' has the unsupported value '" +
+                   sVal +
+                   "' - falling back to '" +
+                   EMlsSendingTrigger.DEFAULT.getID () +
+                   "'");
+    return EMlsSendingTrigger.DEFAULT;
+  }
+
+  /**
+   * @return The duration after the successful forwarding of a document, after which the MLS
+   *         watchdog of the trigger mode {@link EMlsSendingTrigger#API} sends the fallback MLS on
+   *         its own. Never <code>null</code> and always positive.
+   * @since 0.13.0
+   */
+  @NonNull
+  public static Duration getMlsSendingApiTimeout ()
+  {
+    final Duration ret = _getDuration (APConfigurationProperties.MLS_SENDING_API_TIMEOUT,
+                                       APConfigurationProperties.MLS_SENDING_API_TIMEOUT_DEFAULT);
+    if (ret.isPositive ())
+      return ret;
+
+    // A non-positive timeout would make the watchdog answer every document immediately, defeating
+    // the whole point of the trigger mode
+    if (WARNED_INVALID_VALUES.add (APConfigurationProperties.MLS_SENDING_API_TIMEOUT))
+      LOGGER.warn ("The configuration key '" +
+                   APConfigurationProperties.MLS_SENDING_API_TIMEOUT +
+                   "' has the non-positive value '" +
+                   ret +
+                   "' - falling back to '" +
+                   APConfigurationProperties.MLS_SENDING_API_TIMEOUT_DEFAULT +
+                   "'");
+    return APConfigurationProperties.MLS_SENDING_API_TIMEOUT_DEFAULT;
+  }
+
+  /**
+   * @return The MLS response code the watchdog of the trigger mode {@link EMlsSendingTrigger#API}
+   *         uses for the fallback MLS. Only the positive response codes are allowed - a rejection
+   *         is a statement only the Receiver Backend can make. Defaults to
+   *         {@link EPeppolMLSResponseCode#ACKNOWLEDGING}. Never <code>null</code>.
+   * @since 0.13.0
+   */
+  @NonNull
+  public static EPeppolMLSResponseCode getMlsSendingApiTimeoutResponseCode ()
+  {
+    final String sVal = _getConfig ().getAsString (APConfigurationProperties.MLS_SENDING_API_TIMEOUT_CODE);
+    if (StringHelper.isEmpty (sVal))
+      return EPeppolMLSResponseCode.ACKNOWLEDGING;
+
+    final EPeppolMLSResponseCode eRet = EPeppolMLSResponseCode.getFromIDOrNull (sVal);
+    if (eRet != null && eRet.isSuccess ())
+      return eRet;
+
+    if (WARNED_INVALID_VALUES.add (APConfigurationProperties.MLS_SENDING_API_TIMEOUT_CODE))
+      LOGGER.warn ("The configuration key '" +
+                   APConfigurationProperties.MLS_SENDING_API_TIMEOUT_CODE +
+                   "' has the unsupported value '" +
+                   sVal +
+                   "' - only '" +
+                   EPeppolMLSResponseCode.ACCEPTANCE.getID () +
+                   "' and '" +
+                   EPeppolMLSResponseCode.ACKNOWLEDGING.getID () +
+                   "' are allowed - falling back to '" +
+                   EPeppolMLSResponseCode.ACKNOWLEDGING.getID () +
+                   "'");
+    return EPeppolMLSResponseCode.ACKNOWLEDGING;
   }
 
   /**
@@ -833,5 +1148,28 @@ public final class APCoreConfig
   {
     return _getConfig ().getAsInt (APConfigurationProperties.PEPPOL_REPORTING_SCHEDULE_MINUTE,
                                    APConfigurationProperties.PEPPOL_REPORTING_SCHEDULE_MINUTE_DEFAULT);
+  }
+
+  /**
+   * @return The configured participant identifiers that are excluded from Peppol Reporting, in the
+   *         notation used in the configuration file. The values are neither parsed nor validated
+   *         here. May be empty but never <code>null</code>.
+   * @since 0.13.0
+   */
+  @NonNull
+  public static ICommonsOrderedSet <String> getPeppolReportingExcludedParticipantIDs ()
+  {
+    final String sVal = _getConfig ().getAsString (APConfigurationProperties.PEPPOL_REPORTING_EXCLUDE_PARTICIPANT_IDS);
+    final ICommonsOrderedSet <String> ret = new CommonsLinkedHashSet <> ();
+    if (StringHelper.isNotEmpty (sVal))
+    {
+      for (final String sPart : StringHelper.getExploded (',', sVal))
+      {
+        final String sTrimmed = sPart.trim ();
+        if (StringHelper.isNotEmpty (sTrimmed))
+          ret.add (sTrimmed);
+      }
+    }
+    return ret;
   }
 }

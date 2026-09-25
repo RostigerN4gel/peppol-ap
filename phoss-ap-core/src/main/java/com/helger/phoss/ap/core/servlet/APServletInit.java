@@ -67,6 +67,7 @@ import com.helger.phoss.ap.basic.APBasicConfig;
 import com.helger.phoss.ap.basic.APBasicMetaManager;
 import com.helger.phoss.ap.core.APCoreConfig;
 import com.helger.phoss.ap.core.APCoreMetaManager;
+import com.helger.phoss.ap.core.SMPClientManager;
 import com.helger.phoss.ap.core.StartupRecovery;
 import com.helger.phoss.ap.core.dump.AS4GroupedExchangeDumper;
 import com.helger.phoss.ap.core.dump.AS4IncomingDumperWithMetadata;
@@ -82,9 +83,8 @@ import com.helger.security.revocation.CertificateRevocationCheckerDefaults;
 import com.helger.security.revocation.ERevocationCheckMode;
 import com.helger.servlet.ServletHelper;
 import com.helger.smpclient.config.SMPClientConfiguration;
-import com.helger.smpclient.peppol.CachingSMPClientReadOnly;
 import com.helger.smpclient.peppol.SMPClientReadOnly;
-import com.helger.smpclient.url.PeppolNaptrURLProvider;
+import com.helger.smpclient.url.dns.PeppolNaptrURLProvider;
 import com.helger.web.scope.mgr.WebScopeManager;
 import com.helger.xservlet.requesttrack.RequestTrackerSettings;
 
@@ -136,8 +136,8 @@ public class APServletInit
     HttpDebugger.setEnabled (false);
 
     // Sanity check
-    if (CommandMap.getDefaultCommandMap ().createDataContentHandler (CMimeType.MULTIPART_RELATED.getAsString ()) ==
-        null)
+    if (CommandMap.getDefaultCommandMap ()
+                  .createDataContentHandler (CMimeType.MULTIPART_RELATED.getAsString ()) == null)
     {
       throw new IllegalStateException ("No DataContentHandler for MIME Type '" +
                                        CMimeType.MULTIPART_RELATED.getAsString () +
@@ -156,6 +156,11 @@ public class APServletInit
       // Init the IO layer
       WebFileIO.initPaths (new File (sDataPath).getAbsoluteFile (), sServletContextPath, bFileAccessCheck);
     }
+
+    // The JDK internal outbound connections - namely the CRL download and the OCSP request that
+    // the JSSE PKIX trust manager performs during a TLS handshake - do not use Apache HttpClient
+    // and therefore need the configured proxy on the JVM default ProxySelector as well
+    APBasicConfig.installGlobalProxySelector ();
 
     if (APCoreConfig.isOfflineMode ())
     {
@@ -379,8 +384,7 @@ public class APServletInit
 
         Phase4PeppolDefaultReceiverConfiguration.setReceiverCheckEnabled (true);
 
-        final SMPClientReadOnly aReceiverCheckSMPClient = new CachingSMPClientReadOnly (URLHelper.getAsURI (sSMPURL));
-        APBasicConfig.applyHttpProxySettings (aReceiverCheckSMPClient.httpClientSettings ());
+        final SMPClientReadOnly aReceiverCheckSMPClient = SMPClientManager.createSMPClient (URLHelper.getAsURI (sSMPURL));
         Phase4PeppolDefaultReceiverConfiguration.setSMPClient (aReceiverCheckSMPClient);
 
         Phase4PeppolDefaultReceiverConfiguration.setAS4EndpointURL (sAPURL);
@@ -444,6 +448,10 @@ public class APServletInit
     APBasicMetaManager.getInstance ();
     APJdbcMetaManager.getInstance ();
 
+    // Must be done before the Peppol AS4 setup, because the receiver check may already need an SMP
+    // client
+    SMPClientManager.init ();
+
     _initAS4 ();
     _initPeppolAS4 ();
 
@@ -478,6 +486,7 @@ public class APServletInit
     RetryScheduler.stop ();
     ArchivalScheduler.stop ();
     APCoreMetaManager.shutdown ();
+    SMPClientManager.shutdown ();
 
     if (WebScopeManager.isGlobalScopePresent ())
     {

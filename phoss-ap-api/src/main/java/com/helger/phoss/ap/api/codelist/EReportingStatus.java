@@ -33,7 +33,14 @@ public enum EReportingStatus implements IHasID <String>
   /** Reporting record has not yet been created. */
   PENDING ("pending"),
   /** Reporting record has been created. */
-  REPORTED ("reported");
+  REPORTED ("reported"),
+  /**
+   * No Reporting record is created, because the transaction is excluded from Peppol Reporting by
+   * configuration.
+   *
+   * @since 0.13.0
+   */
+  EXCLUDED ("excluded");
 
   private final String m_sID;
 

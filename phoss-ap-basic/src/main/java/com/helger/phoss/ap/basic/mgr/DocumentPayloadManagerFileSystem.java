@@ -212,7 +212,7 @@ public class DocumentPayloadManagerFileSystem implements IDocumentPayloadManager
     ValueEnforcer.notNull (aReferenceDT, "ReferenceDT");
     ValueEnforcer.notEmpty (sFilename, "Filename");
     ValueEnforcer.notEmpty (sFileExt, "FileExt");
-    ValueEnforcer.isTrue ( () -> sFileExt.startsWith ("."), "FileExt must start with a dot");
+    ValueEnforcer.isTrue (() -> sFileExt.startsWith ("."), "FileExt must start with a dot");
     ValueEnforcer.notNull (aPathConsumer, "PathConsumer");
 
     final File aEffectiveBaseDir = _getStorageDir (new File (sBaseDir), aReferenceDT);

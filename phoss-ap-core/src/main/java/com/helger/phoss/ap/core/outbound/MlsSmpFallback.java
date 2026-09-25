@@ -23,8 +23,8 @@ import com.helger.base.tostring.ToStringGenerator;
 import com.helger.peppolid.IParticipantIdentifier;
 
 /**
- * Describes the MLS specific SMP lookup fallback behaviour according to MLS SPOG section 5.4. When a
- * custom <code>MLS_TO</code> receiver cannot be resolved via SMP lookup, the outbound processing
+ * Describes the MLS specific SMP lookup fallback behaviour according to MLS SPOG section 5.4. When
+ * a custom <code>MLS_TO</code> receiver cannot be resolved via SMP lookup, the outbound processing
  * falls back to the default SPID receiver (derived from the sending C2's Peppol AP certificate),
  * after notifying registered handlers via
  * {@link com.helger.phoss.ap.api.spi.IAPNotificationHandlerSPI#onSpecialMlsToNotReachable}.
@@ -44,8 +44,8 @@ public final class MlsSmpFallback
    *        The default SPID receiver participant identifier to use when the primary MLS receiver is
    *        not reachable. May not be <code>null</code>.
    * @param sReferencedSbdhInstanceID
-   *        The SBDH Instance Identifier of the original business document the MLS refers to, used for
-   *        notification purposes. May not be <code>null</code>.
+   *        The SBDH Instance Identifier of the original business document the MLS refers to, used
+   *        for notification purposes. May not be <code>null</code>.
    */
   public MlsSmpFallback (@NonNull final IParticipantIdentifier aFallbackReceiverID,
                          @NonNull final String sReferencedSbdhInstanceID)
@@ -67,7 +67,8 @@ public final class MlsSmpFallback
   }
 
   /**
-   * @return The SBDH Instance Identifier of the original business document. Never <code>null</code>.
+   * @return The SBDH Instance Identifier of the original business document. Never
+   *         <code>null</code>.
    */
   @NonNull
   public String getReferencedSbdhInstanceID ()

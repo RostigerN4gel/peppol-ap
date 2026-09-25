@@ -17,6 +17,7 @@
 package com.helger.phoss.ap.forwarding.http;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 
 import org.apache.hc.client5.http.classic.methods.HttpPost;
 import org.apache.hc.core5.http.ContentType;
@@ -25,6 +26,9 @@ import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.helger.annotation.Nonempty;
+import com.helger.annotation.style.VisibleForTesting;
+import com.helger.base.codec.base64.Base64;
 import com.helger.base.enforce.ValueEnforcer;
 import com.helger.base.state.ESuccess;
 import com.helger.base.string.StringHelper;
@@ -38,13 +42,16 @@ import com.helger.httpclient.HttpClientSettings;
 import com.helger.httpclient.HttpClientSettingsConfig;
 import com.helger.httpclient.response.ExtendedHttpResponseException;
 import com.helger.httpclient.response.ResponseHandlerByteArray;
+import com.helger.json.IJsonArray;
 import com.helger.json.IJsonObject;
 import com.helger.json.serialize.JsonReader;
 import com.helger.phoss.ap.api.codelist.EForwardingMode;
+import com.helger.phoss.ap.api.codelist.EVerificationResult;
+import com.helger.phoss.ap.api.config.APConfigurationProperties;
 import com.helger.phoss.ap.api.mgr.IDocumentForwarder;
 import com.helger.phoss.ap.api.mgr.IDocumentPayloadManager;
 import com.helger.phoss.ap.api.model.ForwardingResult;
-import com.helger.phoss.ap.api.model.IInboundTransaction;
+import com.helger.phoss.ap.api.model.IForwardableDocument;
 import com.helger.phoss.ap.api.otel.CPhossAPOtel;
 import com.helger.telemetry.Telemetry;
 import com.helger.telemetry.ETelemetrySpanKind;
@@ -60,8 +67,27 @@ public class HttpDocumentForwarder implements IDocumentForwarder
   private static final Logger LOGGER = LoggerFactory.getLogger (HttpDocumentForwarder.class);
   private static final int MAX_CUSTOM_HEADERS = 100;
   private static final String HEADER_SBDH_INSTANCE_ID = "X-SBDH-Instance-ID";
+  /** @since 0.12.0 */
+  private static final String HEADER_VERIFICATION_RESULT = "X-Verification-Result";
+  /** @since 0.12.0 */
+  private static final String HEADER_VERIFICATION_DETAILS = "X-Verification-Details";
+  /** @since 0.12.0 */
+  private static final String HEADER_VERIFICATION_DETAILS_TRUNCATED = "X-Verification-Details-Truncated";
+  /**
+   * The maximum length of the base64 encoded value of {@link #HEADER_VERIFICATION_DETAILS}. It is
+   * deliberately far below the 8 KB that most HTTP servers accept for all headers together, because
+   * the remaining headers need their share as well.
+   * <p>
+   * Replace this with <code>CHttpHeader.MAX_HEADER_VALUE_LENGTH</code>, as soon as ph-commons
+   * 12.4.1 is released and referenced here.
+   * </p>
+   *
+   * @since 0.12.0
+   */
+  private static final int MAX_VERIFICATION_DETAILS_LENGTH = 4096;
   // Configuration key suffixes (relative to the configured base prefix)
   private static final String SUFFIX_HTTP_ENDPOINT = "http.endpoint";
+  private static final String SUFFIX_HTTP_VERIFICATION_DETAILS = "http.verification-details";
   private static final String SUFFIX_HTTP_HEADERS_PREFIX = "http.headers.";
   private static final String SUFFIX_HTTP_HEADER_NAME = ".name";
   private static final String SUFFIX_HTTP_HEADER_VALUE = ".value";
@@ -70,6 +96,7 @@ public class HttpDocumentForwarder implements IDocumentForwarder
   private String m_sEndpointURL;
   private final HttpClientSettings m_aHCS = new HttpClientSettings ();
   private final ICommonsOrderedMap <String, String> m_aCustomHeaders = new CommonsLinkedHashMap <> ();
+  private boolean m_bSendVerificationDetails;
 
   /**
    * Constructor for creating an HTTP document forwarder with the specified forwarding mode.
@@ -114,6 +141,13 @@ public class HttpDocumentForwarder implements IDocumentForwarder
 
     HttpClientSettingsConfig.assignConfigValues (m_aHCS, aConfig, sKeyPrefix);
 
+    m_bSendVerificationDetails = aConfig.getAsBoolean (sKeyPrefix + SUFFIX_HTTP_VERIFICATION_DETAILS,
+                                                       APConfigurationProperties.FORWARDING_HTTP_VERIFICATION_DETAILS_DEFAULT);
+    if (m_bSendVerificationDetails)
+      LOGGER.info ("Sending the inbound verification findings in the '" +
+                   HEADER_VERIFICATION_DETAILS +
+                   "' HTTP header");
+
     // Load custom HTTP headers (indexed: <prefix>http.headers.1.name / .value)
     final String sHeadersPrefix = sKeyPrefix + SUFFIX_HTTP_HEADERS_PREFIX;
     for (int nIndex = 1;; nIndex++)
@@ -139,37 +173,124 @@ public class HttpDocumentForwarder implements IDocumentForwarder
   }
 
   /** {@inheritDoc} */
+
   @NonNull
-  public ForwardingResult forwardDocument (@NonNull final IInboundTransaction aTransaction)
+  @Nonempty
+  public String getID ()
   {
-    return Telemetry.withSpan (CPhossAPOtel.SPAN_FORWARDER_DISPATCH, ETelemetrySpanKind.CLIENT, aSpan -> {
-      aSpan.setAttribute (CPhossAPOtel.ATTR_FORWARDER_TYPE, "http")
-           .setAttribute (CPhossAPOtel.ATTR_TRANSACTION_ID, aTransaction.getID ());
-      return _doForwardDocument (aTransaction);
-    });
+    // The HTTP forwarder serves both the synchronous and the asynchronous mode
+    return m_eMode.getID ();
   }
 
   @NonNull
-  private ForwardingResult _doForwardDocument (@NonNull final IInboundTransaction aTransaction)
+  public ForwardingResult forwardDocument (@NonNull final IForwardableDocument aDocument)
+  {
+    return Telemetry.withSpan (CPhossAPOtel.SPAN_FORWARDER_DISPATCH, ETelemetrySpanKind.CLIENT, aSpan -> {
+      aSpan.setAttribute (CPhossAPOtel.ATTR_FORWARDER_TYPE, "http")
+           .setAttribute (CPhossAPOtel.ATTR_FORWARDER_ID, getID ())
+           .setAttribute (CPhossAPOtel.ATTR_TRANSACTION_ID, aDocument.id ());
+      return _doForwardDocument (aDocument);
+    });
+  }
+
+  /**
+   * Add the verification headers to the outgoing request. The verdict is sent whenever the
+   * verification produced one, so that C4 can tell a passed document from an unverified one without
+   * a REST lookup. The detailed findings are opt-in and get truncated to fit into the header - the
+   * REST API stays the authoritative source for the complete list.
+   *
+   * @param aPost
+   *        The request to add the headers to. May not be <code>null</code>.
+   * @param aDocument
+   *        The document to be forwarded. May not be <code>null</code>.
+   * @since 0.12.0
+   */
+  @VisibleForTesting
+  void applyVerificationHeaders (@NonNull final HttpPost aPost, @NonNull final IForwardableDocument aDocument)
+  {
+    final EVerificationResult eVerificationResult = aDocument.verificationResult ();
+    if (eVerificationResult == null)
+    {
+      // Verification is disabled, or the verdict is still deferred
+      return;
+    }
+
+    aPost.setHeader (HEADER_VERIFICATION_RESULT, eVerificationResult.getID ());
+
+    if (!m_bSendVerificationDetails)
+      return;
+
+    final String sDetails = aDocument.verificationDetails ();
+    if (StringHelper.isEmpty (sDetails))
+      return;
+
+    final IJsonArray aIssues = JsonReader.builder ().source (sDetails).readAsArray ();
+    if (aIssues == null)
+    {
+      LOGGER.warn ("The verification details of transaction '" +
+                   aDocument.id () +
+                   "' are no JSON array - not sending the '" +
+                   HEADER_VERIFICATION_DETAILS +
+                   "' header");
+      return;
+    }
+
+    // Drop the trailing issues until the encoded value fits - what is left stays valid JSON
+    boolean bTruncated = false;
+    String sEncoded = Base64.safeEncode (aIssues.getAsJsonString (), StandardCharsets.UTF_8);
+    while (sEncoded != null && sEncoded.length () > MAX_VERIFICATION_DETAILS_LENGTH && aIssues.size () > 0)
+    {
+      aIssues.removeAtIndex (aIssues.size () - 1);
+      bTruncated = true;
+      sEncoded = Base64.safeEncode (aIssues.getAsJsonString (), StandardCharsets.UTF_8);
+    }
+
+    if (sEncoded == null || sEncoded.length () > MAX_VERIFICATION_DETAILS_LENGTH)
+    {
+      LOGGER.warn ("Failed to encode the verification details of transaction '" +
+                   aDocument.id () +
+                   "' - not sending the '" +
+                   HEADER_VERIFICATION_DETAILS +
+                   "' header");
+      return;
+    }
+
+    aPost.setHeader (HEADER_VERIFICATION_DETAILS, sEncoded);
+    if (bTruncated)
+    {
+      LOGGER.info ("Truncated the verification details of transaction '" +
+                   aDocument.id () +
+                   "' to " +
+                   aIssues.size () +
+                   " issue(s), to fit into the '" +
+                   HEADER_VERIFICATION_DETAILS +
+                   "' header");
+      aPost.setHeader (HEADER_VERIFICATION_DETAILS_TRUNCATED, "true");
+    }
+  }
+
+  @NonNull
+  private ForwardingResult _doForwardDocument (@NonNull final IForwardableDocument aDocument)
   {
     final IDocumentPayloadManager aDocPayloadMgr = APBasicMetaManager.getDocPayloadMgr ();
 
     try (final HttpClientManager aHttpClientMgr = HttpClientManager.create (m_aHCS))
     {
       final HttpPost aPost = new HttpPost (m_sEndpointURL);
-      aPost.setEntity (new InputStreamEntity (aDocPayloadMgr.openDocumentStreamForRead (aTransaction.getDocumentPath ()),
+      aPost.setEntity (new InputStreamEntity (aDocPayloadMgr.openDocumentStreamForRead (aDocument.documentPath ()),
                                               ContentType.APPLICATION_XML));
 
       // Apply custom headers (case-insensitive by using setHeader which overwrites existing)
       for (final var aEntry : m_aCustomHeaders.entrySet ())
         aPost.setHeader (aEntry.getKey (), aEntry.getValue ());
 
-      aPost.setHeader (HEADER_SBDH_INSTANCE_ID, aTransaction.getSbdhInstanceID ());
+      aPost.setHeader (HEADER_SBDH_INSTANCE_ID, aDocument.sbdhInstanceID ());
+      applyVerificationHeaders (aPost, aDocument);
 
       LOGGER.info ("Forwarding inbound transaction '" +
-                   aTransaction.getID () +
+                   aDocument.id () +
                    "' (SBDH ID '" +
-                   aTransaction.getSbdhInstanceID () +
+                   aDocument.sbdhInstanceID () +
                    "') to '" +
                    m_sEndpointURL +
                    "'");
@@ -189,7 +310,7 @@ public class HttpDocumentForwarder implements IDocumentForwarder
           {
             final String sErrorMessage = aJsonObject.getAsString ("errorMessage");
             LOGGER.warn ("Receiver indicated no retry for transaction '" +
-                         aTransaction.getID () +
+                         aDocument.id () +
                          "'" +
                          (sErrorMessage != null ? ": " + sErrorMessage : ""));
             yield ForwardingResult.failureNoRetry ("http_sync_no_retry",
@@ -203,7 +324,7 @@ public class HttpDocumentForwarder implements IDocumentForwarder
         }
         case HTTP_POST_ASYNC ->
         {
-          LOGGER.info ("HTTP forwarding successful for transaction " + aTransaction.getID ());
+          LOGGER.info ("HTTP forwarding successful for transaction " + aDocument.id ());
           yield ForwardingResult.success ();
         }
         default ->
@@ -215,14 +336,14 @@ public class HttpDocumentForwarder implements IDocumentForwarder
     }
     catch (final ExtendedHttpResponseException ex)
     {
-      LOGGER.error ("HTTP forwarding failed for transaction '" + aTransaction.getID () + "'", ex);
+      LOGGER.error ("HTTP forwarding failed for transaction '" + aDocument.id () + "'", ex);
       // Status code already in the message
       return ForwardingResult.failure ("http_status", ex.getMessage ());
     }
     catch (final IOException ex)
     {
       LOGGER.error ("HTTP forwarding failed for transaction '" +
-                    aTransaction.getID () +
+                    aDocument.id () +
                     "': " +
                     ex.getMessage () +
                     " (" +
@@ -232,7 +353,7 @@ public class HttpDocumentForwarder implements IDocumentForwarder
     }
     catch (final Exception ex)
     {
-      LOGGER.error ("HTTP forwarding failed for transaction '" + aTransaction.getID () + "'", ex);
+      LOGGER.error ("HTTP forwarding failed for transaction '" + aDocument.id () + "'", ex);
       return ForwardingResult.failure ("http_error", ex.getMessage () + " (" + ex.getClass ().getName () + ")");
     }
   }

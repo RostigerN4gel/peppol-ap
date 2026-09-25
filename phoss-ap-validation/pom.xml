@@ -22,7 +22,7 @@
   <parent>
     <groupId>com.helger.phoss.ap</groupId>
     <artifactId>phoss-ap-parent-pom</artifactId>
-    <version>0.11.0-SNAPSHOT</version>
+    <version>0.13.1-SNAPSHOT</version>
   </parent>
   <artifactId>phoss-ap-validation</artifactId>
   <packaging>jar</packaging>
@@ -70,6 +70,12 @@
     <dependency>
       <groupId>org.slf4j</groupId>
       <artifactId>slf4j-simple</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!-- Needed to parse the SBDH of a non-XML payload - provided by phoss-ap-webapp at runtime -->
+    <dependency>
+      <groupId>org.glassfish.jaxb</groupId>
+      <artifactId>jaxb-runtime</artifactId>
       <scope>test</scope>
     </dependency>
   </dependencies>

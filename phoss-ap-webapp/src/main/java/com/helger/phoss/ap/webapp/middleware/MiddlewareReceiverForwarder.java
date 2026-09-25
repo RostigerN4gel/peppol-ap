@@ -48,6 +48,7 @@ import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
 
+import com.helger.annotation.Nonempty;
 import com.helger.base.enforce.ValueEnforcer;
 import com.helger.base.state.ESuccess;
 import com.helger.base.string.StringHelper;
@@ -56,9 +57,11 @@ import com.helger.config.fallback.IConfigWithFallback;
 import com.helger.http.header.HttpHeaderMap;
 import com.helger.phoss.ap.api.mgr.IDocumentForwarder;
 import com.helger.phoss.ap.api.model.ForwardingResult;
+import com.helger.phoss.ap.api.model.IForwardableDocument;
 import com.helger.phoss.ap.api.model.IInboundTransaction;
 import com.helger.phoss.ap.basic.APBasicMetaManager;
 import com.helger.phoss.ap.core.inbound.InboundHttpHeaderContext;
+import com.helger.phoss.ap.db.APJdbcMetaManager;
 import com.helger.xml.XMLHelper;
 import com.helger.xml.serialize.read.DOMReader;
 
@@ -135,6 +138,15 @@ public class MiddlewareReceiverForwarder implements IDocumentForwarder
 
   /** {@inheritDoc} */
   @Override
+  @NonNull
+  @Nonempty
+  public String getID ()
+  {
+    return PROVIDER_ID;
+  }
+
+  /** {@inheritDoc} */
+  @Override
   public boolean isWithDeliveryConfirmation ()
   {
     // The receiver call synchronously confirms whether the document was accepted by C4,
@@ -170,8 +182,21 @@ public class MiddlewareReceiverForwarder implements IDocumentForwarder
   /** {@inheritDoc} */
   @Override
   @NonNull
-  public ForwardingResult forwardDocument (@NonNull final IInboundTransaction aTx)
+  public ForwardingResult forwardDocument (@NonNull final IForwardableDocument aDocument)
   {
+    // The receiver contract only covers received documents (it needs the AS4 message ID and the
+    // C1 country code, which only the inbound transaction carries)
+    if (!aDocument.kind ().isInbound ())
+      return ForwardingResult.failureNoRetry ("middleware_unsupported_kind",
+                                              "The Middleware receiver does not accept documents of kind '" +
+                                                                             aDocument.kind ().getID () +
+                                                                             "'");
+
+    final IInboundTransaction aTx = APJdbcMetaManager.getInboundTransactionMgr ().getByID (aDocument.id ());
+    if (aTx == null)
+      return ForwardingResult.failure ("middleware_unknown_transaction",
+                                       "Failed to resolve inbound transaction '" + aDocument.id () + "'");
+
     try
     {
       // Read the stored StandardBusinessDocument bytes (== the AS4 aSBDBytes)

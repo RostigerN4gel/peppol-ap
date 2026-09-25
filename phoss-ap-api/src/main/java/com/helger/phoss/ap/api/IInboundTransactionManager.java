@@ -28,6 +28,7 @@ import com.helger.peppol.mls.EPeppolMLSResponseCode;
 import com.helger.peppol.sbdh.EPeppolMLSType;
 import com.helger.phoss.ap.api.codelist.EInboundStatus;
 import com.helger.phoss.ap.api.codelist.EReportingStatus;
+import com.helger.phoss.ap.api.codelist.EVerificationResult;
 import com.helger.phoss.ap.api.model.IInboundTransaction;
 
 /**
@@ -209,6 +210,28 @@ public interface IInboundTransactionManager
                                  @Nullable String sErrorDetails);
 
   /**
+   * Update the status and the next retry date/time of a transaction, without touching the attempt
+   * count. This is used for the deferred verification, because it is retried independently of the
+   * forwarding attempts.
+   *
+   * @param sID
+   *        The transaction ID. Never <code>null</code>.
+   * @param eStatus
+   *        The new status. Never <code>null</code>.
+   * @param aNextRetryDT
+   *        The next retry date/time. May be <code>null</code> if no further retry is to be done.
+   * @param sErrorDetails
+   *        Error details. May be <code>null</code>.
+   * @return {@link ESuccess}
+   * @since 0.12.0
+   */
+  @NonNull
+  ESuccess updateStatusAndNextRetry (@NonNull String sID,
+                                     @NonNull EInboundStatus eStatus,
+                                     @Nullable OffsetDateTime aNextRetryDT,
+                                     @Nullable String sErrorDetails);
+
+  /**
    * Mark a transaction as completed.
    *
    * @param sID
@@ -249,6 +272,59 @@ public interface IInboundTransactionManager
                             @Nullable String sMlsOutboundTransactionID);
 
   /**
+   * Atomically reserve the single MLS slot of an inbound transaction. The response code is only
+   * written if none was determined for the transaction yet, so the first caller wins and every
+   * later one is told that the MLS is already decided. This is what keeps a Receiver Backend that
+   * reports via {@code POST /api/mls/send}, the automatic MLS of the receive path and the MLS
+   * watchdog from all answering C2 for the same business document.
+   *
+   * @param sID
+   *        The transaction ID. Never <code>null</code>.
+   * @param eMlsResponseCode
+   *        The MLS response code to claim the slot with. Never <code>null</code>.
+   * @return {@link ESuccess#SUCCESS} if the slot was claimed by this call,
+   *         {@link ESuccess#FAILURE} if an MLS response code was already determined.
+   * @since 0.13.0
+   */
+  @NonNull
+  ESuccess claimMlsResponseCode (@NonNull String sID, @NonNull EPeppolMLSResponseCode eMlsResponseCode);
+
+  /**
+   * Give back a claim made by {@link #claimMlsResponseCode(String, EPeppolMLSResponseCode)} whose
+   * MLS was never created, so that a later attempt can answer C2 after all. The response code is
+   * only cleared as long as no MLS outbound transaction is referenced, so the code of an MLS that
+   * really exists can never be erased by this.
+   *
+   * @param sID
+   *        The transaction ID. Never <code>null</code>.
+   * @return {@link ESuccess}
+   * @since 0.13.0
+   */
+  @NonNull
+  ESuccess releaseMlsResponseCodeClaim (@NonNull String sID);
+
+  /**
+   * Update the verdict of the inbound document verification. The verdict is deliberately stored
+   * independently of the transaction status, so that it survives the forwarding state machine and
+   * is not cleared by {@link #updateStatusCompleted(String, EInboundStatus)}.
+   *
+   * @param sID
+   *        The transaction ID. Never <code>null</code>.
+   * @param eVerificationResult
+   *        The verification verdict. Never <code>null</code>.
+   * @param sVerificationDetails
+   *        The findings of the verification as a JSON array of
+   *        {@link com.helger.phoss.ap.api.model.VerificationIssue}. May be <code>null</code> if the
+   *        verifier provided no individual findings.
+   * @return {@link ESuccess}
+   * @since 0.12.0
+   */
+  @NonNull
+  ESuccess updateVerificationResult (@NonNull String sID,
+                                     @NonNull EVerificationResult eVerificationResult,
+                                     @Nullable String sVerificationDetails);
+
+  /**
    * Update the reporting status for a transaction.
    *
    * @param sID
@@ -275,6 +351,51 @@ public interface IInboundTransactionManager
    */
   @NonNull
   ICommonsList <IInboundTransaction> getAllForRetry (@Nonnegative int nBatchSize);
+
+  /**
+   * Get inbound transactions with a deferred verification that are eligible for re-verification.
+   *
+   * @param nBatchSize
+   *        Maximum number of transactions to return. Must be &gt; 0.
+   * @return The list of transactions. Never <code>null</code>.
+   * @since 0.12.0
+   */
+  @NonNull
+  ICommonsList <IInboundTransaction> getAllForVerificationRetry (@Nonnegative int nBatchSize);
+
+  /**
+   * Get forwarded inbound business documents that are still waiting for the MLS the Receiver
+   * Backend was supposed to trigger via the API. These are the transactions the MLS watchdog of the
+   * trigger mode {@link com.helger.phoss.ap.api.codelist.EMlsSendingTrigger#API} answers with the
+   * fallback MLS.
+   * <p>
+   * Returned are the transactions in status {@link EInboundStatus#FORWARDED} without an MLS
+   * response code, whose {@code as4_timestamp} is older than the provided limit. The age is
+   * deliberately measured from the reception of the document and not from its forwarding, because
+   * that is what the MLS-1 service level of the Peppol Network Policy measures - a forwarding that
+   * itself took a long time therefore shortens the window of the Receiver Backend instead of
+   * extending the SLA budget.
+   * </p>
+   * <p>
+   * Excluded are inbound MLS and MLR documents, because they are never answered with an MLS, a
+   * document that was rejected by the verification, because C2 already received the negative MLS
+   * (RE) of that rejection, and a document with the MLS type
+   * {@link com.helger.peppol.sbdh.EPeppolMLSType#FAILURE_ONLY}, which never gets a positive MLS at
+   * all - recording a fallback response code for it would only block the rejection the Receiver
+   * Backend may still report.
+   * </p>
+   *
+   * @param nBatchSize
+   *        Maximum number of transactions to return. Must be &gt; 0.
+   * @param aMaxAS4Timestamp
+   *        Only transactions that were received before this date time are returned. May not be
+   *        <code>null</code>.
+   * @return The list of transactions. Never <code>null</code>.
+   * @since 0.13.0
+   */
+  @NonNull
+  ICommonsList <IInboundTransaction> getAllForMlsApiTimeout (@Nonnegative int nBatchSize,
+                                                             @NonNull OffsetDateTime aMaxAS4Timestamp);
 
   /**
    * Get completed inbound transactions eligible for archival.
@@ -305,4 +426,22 @@ public interface IInboundTransactionManager
    */
   @NonNull
   ICommonsList <IInboundTransaction> getAllWithoutC4CountryCode ();
+
+  /**
+   * Get historical transactions with pagination.
+   *
+   * @param nOffset
+   *        Offset to start from. Must be &ge; 0.
+   * @param nLimit
+   *        Maximum number of transactions to return. Must be &ge; 0.
+   * @return The list of transactions. Never <code>null</code>.
+   */
+  @NonNull
+  ICommonsList <IInboundTransaction> getAllTransactions (@Nonnegative int nOffset, @Nonnegative int nLimit);
+
+  /**
+   * @return The total count of active (non-archived) inbound transactions. Must be &ge; 0.
+   */
+  @Nonnegative
+  long getTransactionCount ();
 }

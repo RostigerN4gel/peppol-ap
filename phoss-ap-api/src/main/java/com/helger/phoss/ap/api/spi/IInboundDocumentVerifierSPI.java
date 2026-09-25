@@ -17,13 +17,12 @@
 package com.helger.phoss.ap.api.spi;
 
 import org.jspecify.annotations.NonNull;
-import org.jspecify.annotations.Nullable;
 
 import com.helger.annotation.Nonempty;
 import com.helger.annotation.style.IsSPIInterface;
 import com.helger.peppolid.IDocumentTypeIdentifier;
 import com.helger.peppolid.IProcessIdentifier;
-import com.helger.phoss.ap.api.model.MlsOutcome;
+import com.helger.phoss.ap.api.model.VerificationOutcome;
 
 /**
  * SPI interface for optional document verification. Implementations are loaded via
@@ -33,7 +32,7 @@ import com.helger.phoss.ap.api.model.MlsOutcome;
  * @author Philip Helger
  */
 @IsSPIInterface
-public interface IInboundDocumentVerifierSPI
+public interface IInboundDocumentVerifierSPI extends IDocumentVerifier
 {
   /**
    * Verify a document's content against the given document type and process identifiers.
@@ -44,13 +43,17 @@ public interface IInboundDocumentVerifierSPI
    *        The Peppol Document Type Identifier. Never <code>null</code>.
    * @param aProcessID
    *        The Peppol Process Identifier. Never <code>null</code>.
-   * @return <code>null</code> or an {@link MlsOutcome} with a non-failing response code if the
-   *         verifier has no objection. A non-<code>null</code> {@link MlsOutcome} with response
-   *         code {@link com.helger.peppol.mls.EPeppolMLSResponseCode#REJECTION REJECTION} signals
-   *         that the document is rejected; its issues are propagated into the MLS response.
+   * @return The outcome of the verification. May not be <code>null</code>. Use
+   *         {@link VerificationOutcome#passed()} if the verifier has no objection,
+   *         {@link VerificationOutcome#rejected(String, Iterable)} to reject the document - its
+   *         {@link com.helger.phoss.ap.api.model.VerificationIssue}s are mapped into the MLS
+   *         response - and {@link VerificationOutcome#serviceUnavailable(String)} if the document
+   *         could not be verified at all, because the verifier backend service was unavailable. The
+   *         latter is never an implicit rejection; it is handled according to the configured
+   *         {@link com.helger.phoss.ap.api.codelist.EVerificationFailMode}.
    */
-  @Nullable
-  MlsOutcome verifyInboundDocument (@NonNull @Nonempty String sDocumentPath,
-                                    @NonNull IDocumentTypeIdentifier aDocTypeID,
-                                    @NonNull IProcessIdentifier aProcessID);
+  @NonNull
+  VerificationOutcome verifyInboundDocument (@NonNull @Nonempty String sDocumentPath,
+                                             @NonNull IDocumentTypeIdentifier aDocTypeID,
+                                             @NonNull IProcessIdentifier aProcessID);
 }

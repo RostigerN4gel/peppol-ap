@@ -46,6 +46,36 @@ public final class APConfigurationProperties
   // Certificate revocation (since 0.9.0)
   public static final String PEPPOL_REVOCATION_SOFT_FAIL = "peppol.revocation.soft-fail";
   public static final boolean PEPPOL_REVOCATION_SOFT_FAIL_DEFAULT = false;
+  // SMP client cache (since 0.11.0)
+  /** @since 0.11.0 */
+  public static final String PEPPOL_SMP_CACHE_ENABLED = "peppol.smp.cache.enabled";
+  /** @since 0.11.0 */
+  public static final boolean PEPPOL_SMP_CACHE_ENABLED_DEFAULT = true;
+  /** @since 0.11.0 */
+  public static final String PEPPOL_SMP_CACHE_TTL = "peppol.smp.cache.ttl";
+  /** @since 0.11.0 */
+  public static final Duration PEPPOL_SMP_CACHE_TTL_DEFAULT = Duration.ofMinutes (15);
+  /** @since 0.11.0 */
+  public static final String PEPPOL_SMP_CACHE_MAX_SIZE = "peppol.smp.cache.max-size";
+  /** @since 0.11.0 */
+  public static final int PEPPOL_SMP_CACHE_MAX_SIZE_DEFAULT = 1_000;
+  /**
+   * The connect timeout for all SMP queries. The default equals the previously hardcoded value.
+   *
+   * @since 0.13.0
+   */
+  public static final String PEPPOL_SMP_TIMEOUT_CONNECT = "peppol.smp.timeout.connect";
+  /** @since 0.13.0 */
+  public static final Duration PEPPOL_SMP_TIMEOUT_CONNECT_DEFAULT = Duration.ofSeconds (5);
+  /**
+   * The response (read) timeout for all SMP queries. The default equals the previously hardcoded
+   * value.
+   *
+   * @since 0.13.0
+   */
+  public static final String PEPPOL_SMP_TIMEOUT_RESPONSE = "peppol.smp.timeout.response";
+  /** @since 0.13.0 */
+  public static final Duration PEPPOL_SMP_TIMEOUT_RESPONSE_DEFAULT = Duration.ofSeconds (10);
 
   // AS4 endpoint
   public static final String PHASE4_ENDPOINT_ADDRESS = "phase4.endpoint.address";
@@ -139,6 +169,27 @@ public final class APConfigurationProperties
    */
   public static final String FORWARDING_SECONDARY_MODE_SUFFIX = "mode";
 
+  // Forwarding - MLS copy (since 0.12.0)
+  /**
+   * Prefix for the sink that receives a copy of every MLS this AP generates and sends itself. It is
+   * deliberately a separate sink and not the primary forwarder, because a reporting integration is
+   * normally not the same endpoint as the invoice inbox.
+   *
+   * @since 0.12.0
+   */
+  public static final String FORWARDING_MLS_COPY_PREFIX = "forwarding.mls-copy.";
+  /** @since 0.12.0 */
+  public static final String FORWARDING_MLS_COPY_ENABLED = "forwarding.mls-copy.enabled";
+  /** @since 0.12.0 */
+  public static final boolean FORWARDING_MLS_COPY_ENABLED_DEFAULT = false;
+  /**
+   * The forwarding mode of the MLS copy sink. If it is not set, the whole primary forwarder
+   * configuration is reused.
+   *
+   * @since 0.12.0
+   */
+  public static final String FORWARDING_MLS_COPY_MODE = "forwarding.mls-copy.mode";
+
   // Forwarding - C4 country code determination
   public static final String FORWARDING_C4_COUNTRYCODE_MODES = "forwarding.c4countrycode.modes";
 
@@ -149,6 +200,8 @@ public final class APConfigurationProperties
   public static final String FORWARDING_HTTP_ENDPOINT = "forwarding.http.endpoint";
   @Deprecated (forRemoval = true, since = "0.9.0")
   public static final String FORWARDING_HTTP_HEADERS_PREFIX = "forwarding.http.headers.";
+  /** @since 0.12.0 */
+  public static final boolean FORWARDING_HTTP_VERIFICATION_DETAILS_DEFAULT = false;
 
   // Forwarding - S3
   @Deprecated (forRemoval = true, since = "0.9.0")
@@ -168,6 +221,8 @@ public final class APConfigurationProperties
   public static final boolean FORWARDING_S3_PATH_STYLE_ACCESS_DEFAULT = false;
   /** @since 0.10.2 */
   public static final boolean FORWARDING_S3_WRITE_METADATA_DEFAULT = false;
+  /** @since 0.12.0 */
+  public static final String FORWARDING_S3_FILENAME_PATTERN_DEFAULT = "{sbdh-instance-id}";
 
   // Forwarding - Filesystem (since 0.2.0)
   @Deprecated (forRemoval = true, since = "0.9.0")
@@ -175,10 +230,14 @@ public final class APConfigurationProperties
   @Deprecated (forRemoval = true, since = "0.9.0")
   public static final String FORWARDING_FILESYSTEM_LAYOUT = "forwarding.filesystem.layout";
   public static final String FORWARDING_FILESYSTEM_LAYOUT_DEFAULT = "flat";
+  /** @since 0.12.0 */
+  public static final String FORWARDING_FILESYSTEM_FILENAME_PATTERN_DEFAULT = "{sbdh-instance-id}";
 
   // Forwarding - SFTP
   /** @since 0.10.2 */
   public static final boolean FORWARDING_SFTP_WRITE_METADATA_DEFAULT = false;
+  /** @since 0.12.0 */
+  public static final String FORWARDING_SFTP_FILENAME_PATTERN_DEFAULT = "{datetime}_{incoming-id}";
 
   // Retry sending
   public static final String RETRY_SENDING_MAX_ATTEMPTS = "retry.sending.max-attempts";
@@ -279,12 +338,68 @@ public final class APConfigurationProperties
   public static final long CIRCUIT_BREAKER_OPEN_DURATION_MS_DEFAULT = 60_000L;
   public static final String CIRCUIT_BREAKER_HALF_OPEN_MAX_ATTEMPTS = "circuit-breaker.half-open-max-attempts";
   public static final int CIRCUIT_BREAKER_HALF_OPEN_MAX_ATTEMPTS_DEFAULT = 1;
+  /**
+   * The maximum age of a transaction for which a rejection by the circuit breaker is deferred
+   * without consuming a retry attempt. Older transactions fall back to the regular attempt
+   * counting, so that a permanently unreachable SMP or AP cannot defer a transaction forever.
+   *
+   * @since 0.13.0
+   */
+  public static final String CIRCUIT_BREAKER_DEFER_MAX_DURATION = "circuit-breaker.defer-max-duration";
+  /** @since 0.13.0 */
+  public static final Duration CIRCUIT_BREAKER_DEFER_MAX_DURATION_DEFAULT = Duration.ofHours (12);
+  /**
+   * The number of executions the failure threshold is measured over. If neither this nor
+   * {@link #CIRCUIT_BREAKER_FAILURE_PERIOD} is set, the circuit breaker opens after
+   * {@link #CIRCUIT_BREAKER_FAILURE_THRESHOLD} <b>consecutive</b> failures - the default. Must be
+   * &gt;= the failure threshold, otherwise the value is ignored.
+   * <p>
+   * Together with {@link #CIRCUIT_BREAKER_FAILURE_RATE} this is the minimum number of executions
+   * before the failure rate is evaluated at all.
+   * </p>
+   *
+   * @since 0.13.0
+   */
+  public static final String CIRCUIT_BREAKER_FAILURE_EXECUTIONS = "circuit-breaker.failure-executions";
+  /** @since 0.13.0 */
+  public static final int CIRCUIT_BREAKER_FAILURE_EXECUTIONS_DEFAULT = 0;
+  /**
+   * The rolling time window the failure threshold is measured over. Only the executions inside that
+   * window are counted.
+   * <p>
+   * <b>Note:</b> without {@link #CIRCUIT_BREAKER_FAILURE_RATE} this makes the circuit breaker
+   * <b>more</b> sensitive, not less: the failures inside the window no longer have to be
+   * consecutive. To tolerate isolated failures during short load peaks, set the failure rate as
+   * well.
+   * </p>
+   *
+   * @since 0.13.0
+   */
+  public static final String CIRCUIT_BREAKER_FAILURE_PERIOD = "circuit-breaker.failure-period";
+  /**
+   * The failure rate in percent (1-100) at which the circuit breaker opens. Only used together with
+   * {@link #CIRCUIT_BREAKER_FAILURE_PERIOD}; it replaces the absolute failure threshold. This is
+   * the setting that tolerates isolated failures during short load peaks on an otherwise healthy
+   * SMP or AP.
+   *
+   * @since 0.13.0
+   */
+  public static final String CIRCUIT_BREAKER_FAILURE_RATE = "circuit-breaker.failure-rate";
+  /** @since 0.13.0 */
+  public static final int CIRCUIT_BREAKER_FAILURE_RATE_DEFAULT = 0;
 
   // Verification
   public static final String VERIFICATION_OUTBOUND_ENABLED = "verification.outbound.enabled";
   public static final boolean VERIFICATION_OUTBOUND_ENABLED_DEFAULT = false;
   public static final String VERIFICATION_INBOUND_ENABLED = "verification.inbound.enabled";
   public static final boolean VERIFICATION_INBOUND_ENABLED_DEFAULT = false;
+  public static final String VERIFICATION_FAIL_MODE = "verification.verifier-fail-mode";
+  /** @since 0.12.0 */
+  public static final String VERIFICATION_INBOUND_REJECTION_FORWARDING = "verification.inbound.rejection-forwarding";
+  public static final String VERIFICATION_DEFERRED_RETRY_INTERVAL = "verification.deferred.retry-interval";
+  public static final Duration VERIFICATION_DEFERRED_RETRY_INTERVAL_DEFAULT = Duration.ofMinutes (5);
+  public static final String VERIFICATION_DEFERRED_MAX_DURATION = "verification.deferred.max-duration";
+  public static final Duration VERIFICATION_DEFERRED_MAX_DURATION_DEFAULT = Duration.ofHours (12);
   public static final String VERIFICATION_PHORM_URL = "verification.phorm.url";
   public static final String VERIFICATION_PHORM_TOKEN = "verification.phorm.token";
 
@@ -292,6 +407,14 @@ public final class APConfigurationProperties
   public static final String MLS_SENDING_ENABLED = "mls.sending.enabled";
   public static final boolean MLS_SENDING_ENABLED_DEFAULT = true;
   public static final String MLS_TYPE = "mls.type";
+  /** @since 0.13.0 */
+  public static final String MLS_SENDING_TRIGGER = "mls.sending.trigger";
+  /** @since 0.13.0 */
+  public static final String MLS_SENDING_API_TIMEOUT = "mls.sending.api.timeout";
+  /** @since 0.13.0 */
+  public static final Duration MLS_SENDING_API_TIMEOUT_DEFAULT = Duration.ofMinutes (5);
+  /** @since 0.13.0 */
+  public static final String MLS_SENDING_API_TIMEOUT_CODE = "mls.sending.api.timeout.code";
 
   // Reporting
   public static final String PEPPOL_REPORTING_SCHEDULE_ENABLED = "peppol.reporting.schedule.enabled";
@@ -302,6 +425,14 @@ public final class APConfigurationProperties
   public static final int PEPPOL_REPORTING_SCHEDULE_HOUR_DEFAULT = 6;
   public static final String PEPPOL_REPORTING_SCHEDULE_MINUTE = "peppol.reporting.schedule.minute";
   public static final int PEPPOL_REPORTING_SCHEDULE_MINUTE_DEFAULT = 7;
+  /**
+   * Comma separated list of participant identifiers that are excluded from Peppol Reporting. Each
+   * entry may either be URI encoded (like <code>iso6523-actorid-upis::9915:test</code>) or use the
+   * default participant identifier scheme only (like <code>9915:test</code>).
+   *
+   * @since 0.13.0
+   */
+  public static final String PEPPOL_REPORTING_EXCLUDE_PARTICIPANT_IDS = "peppol.reporting.exclude.participant-ids";
 
   // Duplicate detection
   public static final String DUPLICATE_DETECTION_AS4_MODE = "duplicate.detection.as4.mode";

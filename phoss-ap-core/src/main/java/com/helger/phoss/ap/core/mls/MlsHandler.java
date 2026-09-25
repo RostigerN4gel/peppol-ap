@@ -37,20 +37,21 @@ import com.helger.peppolid.peppol.doctype.EPredefinedDocumentTypeIdentifier;
 import com.helger.peppolid.peppol.process.EPredefinedProcessIdentifier;
 import com.helger.peppolid.peppol.spis.SPIDHelper;
 import com.helger.phase4.peppol.Phase4PeppolSendingReport;
+import com.helger.photon.io.PhotonWorkerPool;
 import com.helger.phoss.ap.api.IInboundTransactionManager;
 import com.helger.phoss.ap.api.IOutboundTransactionManager;
 import com.helger.phoss.ap.api.codelist.EMlsReceptionStatus;
 import com.helger.phoss.ap.api.codelist.ESourceType;
 import com.helger.phoss.ap.api.codelist.ETransactionType;
 import com.helger.phoss.ap.api.datetime.IAPTimestampManager;
+import com.helger.phoss.ap.api.mgr.IDocumentForwarder;
 import com.helger.phoss.ap.api.mgr.IDocumentPayloadManager;
+import com.helger.phoss.ap.api.model.ForwardableDocument;
+import com.helger.phoss.ap.api.model.ForwardingResult;
 import com.helger.phoss.ap.api.model.IInboundTransaction;
 import com.helger.phoss.ap.api.model.IOutboundTransaction;
 import com.helger.phoss.ap.api.model.MlsOutcome;
 import com.helger.phoss.ap.api.otel.CPhossAPOtel;
-import com.helger.telemetry.Telemetry;
-import com.helger.telemetry.ETelemetrySpanKind;
-import com.helger.telemetry.ITelemetrySpan;
 import com.helger.phoss.ap.basic.APBasicConfig;
 import com.helger.phoss.ap.basic.APBasicMetaManager;
 import com.helger.phoss.ap.core.APCoreConfig;
@@ -59,6 +60,9 @@ import com.helger.phoss.ap.core.helper.HashHelper;
 import com.helger.phoss.ap.core.outbound.MlsSmpFallback;
 import com.helger.phoss.ap.core.outbound.OutboundOrchestrator;
 import com.helger.phoss.ap.db.APJdbcMetaManager;
+import com.helger.telemetry.ETelemetrySpanKind;
+import com.helger.telemetry.ITelemetrySpan;
+import com.helger.telemetry.Telemetry;
 
 /**
  * Handler for Peppol Message Level Status (MLS) responses. Responsible for creating outbound MLS
@@ -75,8 +79,133 @@ public final class MlsHandler
   {}
 
   /**
+   * Dispatch a copy of a self-generated MLS to the configured MLS copy sink. This is a
+   * fire-and-forget dispatch: it never influences the MLS sending to C2 and never touches the
+   * inbound transaction status. Nothing happens at all if no sink is configured.
+   *
+   * @param aMlsTx
+   *        The outbound transaction of the MLS. May not be <code>null</code>.
+   * @param eResponseCode
+   *        The MLS response code, for the log messages and the telemetry span. May not be
+   *        <code>null</code>.
+   * @since 0.12.0
+   */
+  private static void _forwardMlsCopy (@NonNull final IOutboundTransaction aMlsTx,
+                                       @NonNull final EPeppolMLSResponseCode eResponseCode)
+  {
+    final IDocumentForwarder aForwarder = APCoreMetaManager.getMlsCopyForwarderOrNull ();
+    if (aForwarder == null)
+    {
+      // Not configured - stay silent
+      return;
+    }
+
+    final ForwardableDocument aDocument = ForwardableDocument.fromOutboundMlsCopy (aMlsTx);
+
+    PhotonWorkerPool.getInstance ().run ("forward-mls-copy", () -> {
+      try (final ITelemetrySpan aSpan = Telemetry.startSpan (CPhossAPOtel.SPAN_MLS_FORWARD_COPY,
+                                                             ETelemetrySpanKind.PRODUCER)
+                                                 .setAttribute (CPhossAPOtel.ATTR_TRANSACTION_ID, aMlsTx.getID ())
+                                                 .setAttribute (CPhossAPOtel.ATTR_SBDH_INSTANCE_ID,
+                                                                aMlsTx.getSbdhInstanceID ())
+                                                 .setAttribute (CPhossAPOtel.ATTR_MLS_RESPONSE_CODE,
+                                                                eResponseCode.getID ()))
+      {
+        try
+        {
+          final ForwardingResult aResult = aForwarder.forwardDocument (aDocument);
+          if (aResult.isSuccess ())
+          {
+            LOGGER.info ("Forwarded the copy of the MLS (" +
+                         eResponseCode.getID () +
+                         ") of outbound transaction '" +
+                         aMlsTx.getID () +
+                         "'");
+            aSpan.setStatusOk ();
+          }
+          else
+          {
+            LOGGER.warn ("Failed to forward the copy of the MLS (" +
+                         eResponseCode.getID () +
+                         ") of outbound transaction '" +
+                         aMlsTx.getID () +
+                         "': " +
+                         aResult.getErrorDetails ());
+            aSpan.setStatusError (aResult.getErrorDetails ());
+          }
+        }
+        catch (final Exception ex)
+        {
+          // Be resilient - this must never influence the MLS sending
+          LOGGER.error ("Internal error forwarding the copy of the MLS of outbound transaction '" +
+                        aMlsTx.getID () +
+                        "'",
+                        ex);
+          aSpan.recordException (ex);
+        }
+      }
+    });
+  }
+
+  /**
+   * Create the outbound MLS response transaction for the outcome of an inbound document, if
+   * required by the MLS strategy. The MLS is <b>not</b> sent by this method - the caller decides
+   * when and on which thread that happens, e.g. via {@link #sendCreatedMlsAsync(MlsCreationResult)}.
+   *
+   * @param aInboundTx
+   *        The inbound transaction. Never <code>null</code>.
+   * @param aOutcome
+   *        The MLS outcome carrying the response code, optional response text, and optional issues
+   *        for rejection responses. Never <code>null</code>.
+   * @return The creation result, carrying the created outbound MLS transaction. Never
+   *         <code>null</code>.
+   * @since 0.13.0
+   */
+  @NonNull
+  public static MlsCreationResult createInboundResultMls (@NonNull final IInboundTransaction aInboundTx,
+                                                          @NonNull final MlsOutcome aOutcome)
+  {
+    // Global MLS kill switch
+    if (!APCoreConfig.isMlsSendingEnabled ())
+    {
+      LOGGER.info ("MLS sending is globally disabled - skipping MLS for transaction '" + aInboundTx.getID () + "'");
+      return MlsCreationResult.suppressed (aOutcome.getResponseCode ());
+    }
+
+    try (final ITelemetrySpan aSpan = Telemetry.startSpan (CPhossAPOtel.SPAN_MLS_SEND, ETelemetrySpanKind.PRODUCER)
+                                               .setAttribute (CPhossAPOtel.ATTR_TRANSACTION_ID, aInboundTx.getID ())
+                                               .setAttribute (CPhossAPOtel.ATTR_SBDH_INSTANCE_ID,
+                                                              aInboundTx.getSbdhInstanceID ())
+                                               .setAttribute (CPhossAPOtel.ATTR_MLS_RESPONSE_CODE,
+                                                              aOutcome.getResponseCode ().getID ()))
+    {
+      return _createInboundResultMls (aInboundTx, aOutcome);
+    }
+  }
+
+  /**
+   * Send an MLS that was previously created by {@link #createInboundResultMls(IInboundTransaction, MlsOutcome)}
+   * asynchronously. Nothing happens if the MLS was suppressed or its creation failed.
+   *
+   * @param aCreationResult
+   *        The result of the MLS creation. May not be <code>null</code>.
+   * @since 0.13.0
+   */
+  public static void sendCreatedMlsAsync (@NonNull final MlsCreationResult aCreationResult)
+  {
+    if (!aCreationResult.hasMlsTx ())
+    {
+      // Nothing to send - either suppressed by the MLS strategy or the creation failed
+      return;
+    }
+
+    PhotonWorkerPool.getInstance ().run ("send-mls", () -> _sendCreatedMls (aCreationResult));
+  }
+
+  /**
    * Handle the outcome of an inbound document by creating an outbound MLS response transaction if
-   * required by the MLS strategy.
+   * required by the MLS strategy, and by sending it right away. The sending happens synchronously
+   * on the calling thread.
    *
    * @param aInboundTx
    *        The inbound transaction. Never <code>null</code>.
@@ -103,172 +232,281 @@ public final class MlsHandler
                                                .setAttribute (CPhossAPOtel.ATTR_MLS_RESPONSE_CODE,
                                                               aOutcome.getResponseCode ().getID ()))
     {
-      final IAPTimestampManager aTimestampMgr = APBasicMetaManager.getTimestampMgr ();
-      final IIdentifierFactory aIF = APBasicMetaManager.getIdentifierFactory ();
-      final IInboundTransactionManager aInboundMgr = APJdbcMetaManager.getInboundTransactionMgr ();
-      final IOutboundTransactionManager aOutboundMgr = APJdbcMetaManager.getOutboundTransactionMgr ();
-      final IDocumentPayloadManager aDocPayloadMgr = APBasicMetaManager.getDocPayloadMgr ();
-
-      final EPeppolMLSResponseCode eResponseCode = aOutcome.getResponseCode ();
-      final EPeppolMLSType eMlsType = aInboundTx.getMlsType ();
-
-      // Determine if we should send MLS
-      if (eMlsType == EPeppolMLSType.FAILURE_ONLY && eResponseCode.isSuccess ())
-      {
-        LOGGER.info ("MLS not required for transaction " +
-                     aInboundTx.getID () +
-                     " (FAILURE_ONLY, outcome=" +
-                     eResponseCode.getID () +
-                     ")");
-        final String sMlsOutboundTransactionID = null;
-        return aInboundMgr.updateMlsFields (aInboundTx.getID (), eResponseCode, sMlsOutboundTransactionID);
-      }
-
-      LOGGER.info ("Creating MLS response (" +
-                   eResponseCode.getID () +
-                   ") for inbound transaction '" +
-                   aInboundTx.getID () +
-                   "'");
-
-      // Create MLS data structure from MlsOutcome
-      final String sSenderPIDValue = SPIDHelper.SPIS_PARTICIPANT_ID_SCHEME + ":" + APCoreConfig.getPeppolOwnerSPID ();
-      final IParticipantIdentifier aMLSSenderPID = aIF.createParticipantIdentifierWithDefaultScheme (sSenderPIDValue);
-      if (aMLSSenderPID == null)
-      {
-        // Failed to build PID
-        LOGGER.error ("Failed to create MLS sender participant ID with value '" + sSenderPIDValue + "'");
+      final MlsCreationResult aCreationResult = _createInboundResultMls (aInboundTx, aOutcome);
+      if (aCreationResult.isFailure ())
         return ESuccess.FAILURE;
-      }
 
-      // The default SPID receiver is always derived from the sending C2's Seat ID (drop the 3-char
-      // prefix). It is the fallback target if a custom MLS_TO is not reachable (MLS SPOG 5.4).
-      final String sDefaultSpidValue = SPIDHelper.SPIS_PARTICIPANT_ID_SCHEME +
-                                       ":" +
-                                       aInboundTx.getC2SeatID ().substring (3);
-      final IParticipantIdentifier aDefaultSpidReceiverPID = aIF.createParticipantIdentifierWithDefaultScheme (sDefaultSpidValue);
-      if (aDefaultSpidReceiverPID == null)
+      if (aCreationResult.isAlreadyDetermined ())
       {
-        // Failed to build PID
-        LOGGER.error ("Failed to create default SPID MLS receiver participant ID with value '" +
-                      sDefaultSpidValue +
-                      "'");
-        return ESuccess.FAILURE;
+        // Somebody else answered C2 first - the desired end state holds, so this is no failure
+        return ESuccess.SUCCESS;
       }
 
-      // If an MlsTo value is in the DB, it is previously checked and valid
-      final IParticipantIdentifier aMLSReceiverPID;
-      if (StringHelper.isNotEmpty (aInboundTx.getMlsTo ()))
+      if (!aCreationResult.hasMlsTx ())
       {
-        // DB value contains meta-scheme, scheme and value
-        aMLSReceiverPID = aIF.parseParticipantIdentifier (aInboundTx.getMlsTo ());
-        if (aMLSReceiverPID == null)
-        {
-          // Failed to build PID
-          LOGGER.error ("Failed to parse MLS receiver participant ID '" + aInboundTx.getMlsTo () + "'");
-          return ESuccess.FAILURE;
-        }
-      }
-      else
-      {
-        aMLSReceiverPID = aDefaultSpidReceiverPID;
+        // Deliberately not sent - the response code was recorded nevertheless
+        return ESuccess.SUCCESS;
       }
 
-      final PeppolMLSBuilder aBuilder = aOutcome.getAsMLSBuilder ();
-      aBuilder.randomID ()
-              .issueDateTimeNow ()
-              .senderParticipantID (aMLSSenderPID)
-              .receiverParticipantID (aMLSReceiverPID)
-              .referenceId (aInboundTx.getSbdhInstanceID ());
-      final var aMls = aBuilder.build ();
-      if (aMls == null)
-      {
-        // Failed to build MLS
-        LOGGER.error ("Failed to build MLS data structure - see log for details");
-        return ESuccess.FAILURE;
-      }
-
-      // Serialize ApplicationResponse to XML
-      final byte [] aMlsBytes = new PeppolMLSMarshaller ().getAsBytes (aMls);
-      if (aMlsBytes == null)
-      {
-        // Failed to serialize MLS
-        LOGGER.error ("Failed to serialize MLS to bytes - see log for details");
-        return ESuccess.FAILURE;
-      }
-
-      LOGGER.info ("Sending MLS from '" +
-                   aBuilder.senderParticipantID ().getURIEncoded () +
-                   "' to '" +
-                   aBuilder.receiverParticipantID ().getURIEncoded () +
-                   "'");
-
-      final String sMlsSbdhInstanceID = PeppolSBDHData.createRandomSBDHInstanceIdentifier ();
-      final OffsetDateTime aCreationDT = aTimestampMgr.getCurrentDateTimeUTC ();
-
-      // Create an outbound transaction for the MLS response
-
-      // Store MLS document to disk
-      final String sDocumentPath = aDocPayloadMgr.storeDocument (APBasicConfig.getStorageOutboundPath (),
-                                                                 aCreationDT,
-                                                                 sMlsSbdhInstanceID + ".mls",
-                                                                 aMlsBytes);
-
-      // MLS can never have an MLS_TO
-      final String sMlsTo = null;
-
-      // The SBDH parameters are not needed for SBDH
-      final String sSbdhStandard = null;
-      final String sSbdhTypeVersion = null;
-      final String sSbdhType = null;
-      final String sPayloadMimeType = null;
-
-      // Custom fields do not apply to system-generated MLS responses
-      final String sCustom1 = null;
-      final String sCustom2 = null;
-      final String sCustom3 = null;
-
-      // Create outbound transaction
-      final String sMlsTxID = aOutboundMgr.create (ETransactionType.MLS_RESPONSE,
-                                                   aMLSSenderPID.getURIEncoded (),
-                                                   aMLSReceiverPID.getURIEncoded (),
-                                                   EPredefinedDocumentTypeIdentifier.PEPPOL_MLS_1_0.getURIEncoded (),
-                                                   EPredefinedProcessIdentifier.urn_peppol_edec_mls.getURIEncoded (),
-                                                   sMlsSbdhInstanceID,
-                                                   ESourceType.PAYLOAD_ONLY,
-                                                   sDocumentPath,
-                                                   aMlsBytes.length,
-                                                   HashHelper.sha256Hex (aMlsBytes),
-                                                   APCoreConfig.getPeppolOwnerCountryCode (),
-                                                   aCreationDT,
-                                                   sMlsTo,
-                                                   aInboundTx.getID (),
-                                                   sSbdhStandard,
-                                                   sSbdhTypeVersion,
-                                                   sSbdhType,
-                                                   sPayloadMimeType,
-                                                   sCustom1,
-                                                   sCustom2,
-                                                   sCustom3);
-      final var aMlsTx = aOutboundMgr.getByID (sMlsTxID);
-      if (aMlsTx == null)
-      {
-        LOGGER.error ("Failed to submit outbound transaction");
-        return ESuccess.FAILURE;
-      }
-
-      // Update inbound with MLS fields
-      if (aInboundMgr.updateMlsFields (aInboundTx.getID (), eResponseCode, sMlsTxID).isFailure ())
-        LOGGER.error ("Failed to update MLS fields for inbound transaction '" + aInboundTx.getID () + "'");
-
-      // Perform actual sending. Provide the default SPID as MLS fallback target in case the custom
-      // MLS_TO receiver is not reachable via SMP (MLS SPOG section 5.4).
-      final MlsSmpFallback aMlsFallback = new MlsSmpFallback (aDefaultSpidReceiverPID,
-                                                             aInboundTx.getSbdhInstanceID ());
-      final Phase4PeppolSendingReport aSendingReport = OutboundOrchestrator.processPendingOutbound ("[SubmitMLS] ",
-                                                                                                    aMlsTx,
-                                                                                                    aMlsFallback);
-      return ESuccess.valueOf (aSendingReport.isOverallSuccess ());
+      return _sendCreatedMls (aCreationResult);
     }
+  }
+
+  /**
+   * Claim the single MLS slot of the inbound transaction and create the MLS if the claim was won.
+   * This is the shared body of {@link #createInboundResultMls(IInboundTransaction, MlsOutcome)} and
+   * {@link #triggerSendingInboundResultMls(IInboundTransaction, MlsOutcome)}, and expects the
+   * global MLS kill switch to have been evaluated by the caller.
+   * <p>
+   * Every MLS of an inbound transaction is created here - the receive path, the retry scheduler,
+   * the MLS watchdog, the operations endpoint and the MLS sending endpoint alike - so this is the
+   * single place where "exactly one MLS per business document" can be enforced for all of them.
+   * </p>
+   *
+   * @param aInboundTx
+   *        The inbound transaction. Never <code>null</code>.
+   * @param aOutcome
+   *        The MLS outcome. Never <code>null</code>.
+   * @return The creation result. Never <code>null</code>.
+   */
+  @NonNull
+  private static MlsCreationResult _createInboundResultMls (@NonNull final IInboundTransaction aInboundTx,
+                                                            @NonNull final MlsOutcome aOutcome)
+  {
+    final IInboundTransactionManager aInboundMgr = APJdbcMetaManager.getInboundTransactionMgr ();
+    final EPeppolMLSResponseCode eResponseCode = aOutcome.getResponseCode ();
+
+    // Peppol expects exactly one MLS per business document, so the slot is reserved before
+    // anything is built. The claim is atomic, which is what a check of the current response code
+    // could never be: the transaction at hand is a snapshot that was read before the forwarding,
+    // and a Receiver Backend may have reported the outcome in the meantime
+    if (aInboundMgr.claimMlsResponseCode (aInboundTx.getID (), eResponseCode).isFailure ())
+    {
+      LOGGER.info ("An MLS was already determined for the inbound transaction '" +
+                   aInboundTx.getID () +
+                   "' - not creating a second one for the response code '" +
+                   eResponseCode.getID () +
+                   "'");
+      return MlsCreationResult.alreadyDetermined (eResponseCode);
+    }
+
+    final MlsCreationResult ret = _createClaimedInboundResultMls (aInboundTx, aOutcome);
+    if (ret.isFailure ())
+    {
+      // The claim must not outlive a failed creation - the transaction would look answered while
+      // nothing was ever sent, and no later attempt could correct that
+      if (aInboundMgr.releaseMlsResponseCodeClaim (aInboundTx.getID ()).isFailure ())
+        LOGGER.error ("Failed to release the MLS claim of the inbound transaction '" + aInboundTx.getID () + "'");
+    }
+    return ret;
+  }
+
+  /**
+   * Create the MLS document, store it and persist the outbound transaction for it. Expects the MLS
+   * slot of the inbound transaction to have been claimed by the caller.
+   *
+   * @param aInboundTx
+   *        The inbound transaction. Never <code>null</code>.
+   * @param aOutcome
+   *        The MLS outcome. Never <code>null</code>.
+   * @return The creation result. Never <code>null</code>.
+   */
+  @NonNull
+  private static MlsCreationResult _createClaimedInboundResultMls (@NonNull final IInboundTransaction aInboundTx,
+                                                                   @NonNull final MlsOutcome aOutcome)
+  {
+    final IAPTimestampManager aTimestampMgr = APBasicMetaManager.getTimestampMgr ();
+    final IIdentifierFactory aIF = APBasicMetaManager.getIdentifierFactory ();
+    final IInboundTransactionManager aInboundMgr = APJdbcMetaManager.getInboundTransactionMgr ();
+    final IOutboundTransactionManager aOutboundMgr = APJdbcMetaManager.getOutboundTransactionMgr ();
+    final IDocumentPayloadManager aDocPayloadMgr = APBasicMetaManager.getDocPayloadMgr ();
+
+    final EPeppolMLSResponseCode eResponseCode = aOutcome.getResponseCode ();
+    final EPeppolMLSType eMlsType = aInboundTx.getMlsType ();
+
+    // Determine if we should send MLS
+    if (eMlsType == EPeppolMLSType.FAILURE_ONLY && eResponseCode.isSuccess ())
+    {
+      LOGGER.info ("MLS not required for transaction " +
+                   aInboundTx.getID () +
+                   " (FAILURE_ONLY, outcome=" +
+                   eResponseCode.getID () +
+                   ")");
+      // The response code is already recorded by the claim - there is no MLS outbound transaction
+      // to add to it
+      return MlsCreationResult.suppressed (eResponseCode);
+    }
+
+    LOGGER.info ("Creating MLS response (" +
+                 eResponseCode.getID () +
+                 ") for inbound transaction '" +
+                 aInboundTx.getID () +
+                 "'");
+
+    // Create MLS data structure from MlsOutcome
+    final String sSenderPIDValue = SPIDHelper.SPIS_PARTICIPANT_ID_SCHEME + ":" + APCoreConfig.getPeppolOwnerSPID ();
+    final IParticipantIdentifier aMLSSenderPID = aIF.createParticipantIdentifierWithDefaultScheme (sSenderPIDValue);
+    if (aMLSSenderPID == null)
+    {
+      // Failed to build PID
+      LOGGER.error ("Failed to create MLS sender participant ID with value '" + sSenderPIDValue + "'");
+      return MlsCreationResult.failure (eResponseCode);
+    }
+
+    // The default SPID receiver is always derived from the sending C2's Seat ID (drop the 3-char
+    // prefix). It is the fallback target if a custom MLS_TO is not reachable (MLS SPOG 5.4).
+    final String sDefaultSpidValue = SPIDHelper.SPIS_PARTICIPANT_ID_SCHEME +
+                                     ":" +
+                                     SPIDHelper.getMainIDFromSeatID (aInboundTx.getC2SeatID ());
+    final IParticipantIdentifier aDefaultSpidReceiverPID = aIF.createParticipantIdentifierWithDefaultScheme (sDefaultSpidValue);
+    if (aDefaultSpidReceiverPID == null)
+    {
+      // Failed to build PID
+      LOGGER.error ("Failed to create default SPID MLS receiver participant ID with value '" +
+                    sDefaultSpidValue +
+                    "'");
+      return MlsCreationResult.failure (eResponseCode);
+    }
+
+    // If an MlsTo value is in the DB, it is previously checked and valid
+    final IParticipantIdentifier aMLSReceiverPID;
+    if (StringHelper.isNotEmpty (aInboundTx.getMlsTo ()))
+    {
+      // DB value contains meta-scheme, scheme and value
+      aMLSReceiverPID = aIF.parseParticipantIdentifier (aInboundTx.getMlsTo ());
+      if (aMLSReceiverPID == null)
+      {
+        // Failed to build PID
+        LOGGER.error ("Failed to parse MLS receiver participant ID '" + aInboundTx.getMlsTo () + "'");
+        return MlsCreationResult.failure (eResponseCode);
+      }
+    }
+    else
+    {
+      aMLSReceiverPID = aDefaultSpidReceiverPID;
+    }
+
+    final PeppolMLSBuilder aBuilder = aOutcome.getAsMLSBuilder ();
+    aBuilder.randomID ()
+            .issueDateTimeNow ()
+            .senderParticipantID (aMLSSenderPID)
+            .receiverParticipantID (aMLSReceiverPID)
+            .referenceId (aInboundTx.getSbdhInstanceID ());
+    final var aMls = aBuilder.build ();
+    if (aMls == null)
+    {
+      // Failed to build MLS
+      LOGGER.error ("Failed to build MLS data structure - see log for details");
+      return MlsCreationResult.failure (eResponseCode);
+    }
+
+    // Serialize ApplicationResponse to XML
+    final byte [] aMlsBytes = new PeppolMLSMarshaller ().getAsBytes (aMls);
+    if (aMlsBytes == null)
+    {
+      // Failed to serialize MLS
+      LOGGER.error ("Failed to serialize MLS to bytes - see log for details");
+      return MlsCreationResult.failure (eResponseCode);
+    }
+
+    LOGGER.info ("Sending MLS from '" +
+                 aBuilder.senderParticipantID ().getURIEncoded () +
+                 "' to '" +
+                 aBuilder.receiverParticipantID ().getURIEncoded () +
+                 "'");
+
+    final String sMlsSbdhInstanceID = PeppolSBDHData.createRandomSBDHInstanceIdentifier ();
+    final OffsetDateTime aCreationDT = aTimestampMgr.getCurrentDateTimeUTC ();
+
+    // Create an outbound transaction for the MLS response
+
+    // Store MLS document to disk
+    final String sDocumentPath = aDocPayloadMgr.storeDocument (APBasicConfig.getStorageOutboundPath (),
+                                                               aCreationDT,
+                                                               sMlsSbdhInstanceID + ".mls",
+                                                               aMlsBytes);
+
+    // MLS can never have an MLS_TO
+    final String sMlsTo = null;
+
+    // The SBDH parameters are not needed for SBDH
+    final String sSbdhStandard = null;
+    final String sSbdhTypeVersion = null;
+    final String sSbdhType = null;
+    final String sPayloadMimeType = null;
+
+    // Custom fields do not apply to system-generated MLS responses
+    final String sCustom1 = null;
+    final String sCustom2 = null;
+    final String sCustom3 = null;
+
+    // Create outbound transaction
+    final String sMlsTxID = aOutboundMgr.create (ETransactionType.MLS_RESPONSE,
+                                                 aMLSSenderPID.getURIEncoded (),
+                                                 aMLSReceiverPID.getURIEncoded (),
+                                                 EPredefinedDocumentTypeIdentifier.PEPPOL_MLS_1_0.getURIEncoded (),
+                                                 EPredefinedProcessIdentifier.urn_peppol_edec_mls.getURIEncoded (),
+                                                 sMlsSbdhInstanceID,
+                                                 ESourceType.PAYLOAD_ONLY,
+                                                 sDocumentPath,
+                                                 aMlsBytes.length,
+                                                 HashHelper.sha256Hex (aMlsBytes),
+                                                 APCoreConfig.getPeppolOwnerCountryCode (),
+                                                 aCreationDT,
+                                                 sMlsTo,
+                                                 aInboundTx.getID (),
+                                                 sSbdhStandard,
+                                                 sSbdhTypeVersion,
+                                                 sSbdhType,
+                                                 sPayloadMimeType,
+                                                 sCustom1,
+                                                 sCustom2,
+                                                 sCustom3);
+    final var aMlsTx = aOutboundMgr.getByID (sMlsTxID);
+    if (aMlsTx == null)
+    {
+      LOGGER.error ("Failed to submit outbound transaction");
+      return MlsCreationResult.failure (eResponseCode);
+    }
+
+    // Update inbound with MLS fields
+    if (aInboundMgr.updateMlsFields (aInboundTx.getID (), eResponseCode, sMlsTxID).isFailure ())
+      LOGGER.error ("Failed to update MLS fields for inbound transaction '" + aInboundTx.getID () + "'");
+
+    // Provide the default SPID as MLS fallback target in case the custom MLS_TO receiver is not
+    // reachable via SMP (MLS SPOG section 5.4).
+    final MlsSmpFallback aMlsFallback = new MlsSmpFallback (aDefaultSpidReceiverPID, aInboundTx.getSbdhInstanceID ());
+    return MlsCreationResult.created (eResponseCode, aMlsTx, aMlsFallback);
+  }
+
+  /**
+   * Send an already created MLS: hand out the optional copy and perform the AS4 transmission.
+   *
+   * @param aCreationResult
+   *        The result of the MLS creation, which must carry an outbound MLS transaction. May not be
+   *        <code>null</code>.
+   * @return {@link ESuccess}
+   */
+  @NonNull
+  private static ESuccess _sendCreatedMls (@NonNull final MlsCreationResult aCreationResult)
+  {
+    final IOutboundTransaction aMlsTx = aCreationResult.mlsTx ();
+    final EPeppolMLSResponseCode eResponseCode = aCreationResult.responseCode ();
+    final MlsSmpFallback aMlsFallback = aCreationResult.smpFallback ();
+    if (aMlsTx == null || eResponseCode == null || aMlsFallback == null)
+    {
+      LOGGER.error ("The MLS creation result contains no outbound transaction that could be sent");
+      return ESuccess.FAILURE;
+    }
+
+    // Optionally hand C4 a copy of the MLS we are about to send - AP, AB and RE alike
+    _forwardMlsCopy (aMlsTx, eResponseCode);
+
+    // Perform actual sending
+    final Phase4PeppolSendingReport aSendingReport = OutboundOrchestrator.processPendingOutbound ("[SubmitMLS] ",
+                                                                                                  aMlsTx,
+                                                                                                  aMlsFallback);
+    return ESuccess.valueOf (aSendingReport.isOverallSuccess ());
   }
 
   /**

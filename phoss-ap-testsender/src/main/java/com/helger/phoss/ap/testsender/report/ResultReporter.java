@@ -86,14 +86,14 @@ public class ResultReporter
     if (aByType.size () > 1)
     {
       LOGGER.info ("By type:");
-      aByType.forEach ( (sType, nCount) -> LOGGER.info ("  " + sType + ": " + nCount));
+      aByType.forEach ((sType, nCount) -> LOGGER.info ("  " + sType + ": " + nCount));
     }
 
     final Map <String, Long> aErrors = aResult.getErrorBreakdown ();
     if (!aErrors.isEmpty ())
     {
       LOGGER.info ("Error breakdown:");
-      aErrors.forEach ( (sErr, nCount) -> LOGGER.info ("  " + nCount + " x " + sErr));
+      aErrors.forEach ((sErr, nCount) -> LOGGER.info ("  " + nCount + " x " + sErr));
     }
   }
 

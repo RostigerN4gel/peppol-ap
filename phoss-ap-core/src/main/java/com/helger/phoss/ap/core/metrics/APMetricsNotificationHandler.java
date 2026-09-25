@@ -16,6 +16,7 @@
  */
 package com.helger.phoss.ap.core.metrics;
 
+import java.time.OffsetDateTime;
 import java.time.YearMonth;
 
 import org.jspecify.annotations.NonNull;
@@ -23,6 +24,8 @@ import org.jspecify.annotations.Nullable;
 
 import com.helger.annotation.style.IsSPIImplementation;
 import com.helger.peppol.mls.EPeppolMLSResponseCode;
+import com.helger.phoss.ap.api.model.MlsOutcome;
+import com.helger.phoss.ap.api.model.VerifierResult;
 import com.helger.phoss.ap.api.otel.CPhossAPOtel;
 import com.helger.phoss.ap.api.spi.IAPNotificationHandlerSPI;
 import com.helger.telemetry.TelemetryAttributes;
@@ -52,13 +55,23 @@ public class APMetricsNotificationHandler implements IAPNotificationHandlerSPI
 
   public void onInboundVerificationRejection (@NonNull final String sTransactionID,
                                               @NonNull final String sSbdhInstanceID,
-                                              @Nullable final String sErrorDetails)
+                                              @Nullable final String sErrorDetails,
+                                              @NonNull final MlsOutcome aMlsOutcome)
   {
     APMetrics.INBOUND_VERIFICATION_REJECTIONS.add (1, _baseTxAttrs (sTransactionID, sSbdhInstanceID));
   }
 
+  public void onInboundVerificationDeferred (@NonNull final String sTransactionID,
+                                             @NonNull final String sSbdhInstanceID,
+                                             @NonNull final String sVerifierName,
+                                             @NonNull final OffsetDateTime aNextRetryDT,
+                                             @Nullable final String sErrorDetails)
+  {
+    APMetrics.INBOUND_VERIFICATION_DEFERRED.add (1, _baseTxAttrs (sTransactionID, sSbdhInstanceID));
+  }
+
   public void onOutboundVerificationRejection (@NonNull final String sSbdhInstanceID,
-                                               @Nullable final String sErrorDetails)
+                                               @NonNull final VerifierResult aVerifierResult)
   {
     APMetrics.OUTBOUND_VERIFICATION_REJECTIONS.add (1,
                                                     TelemetryAttributes.builder ()

@@ -37,8 +37,7 @@ public class InboundTransactionResponse
   @Schema (description = "Internal transaction ID assigned by the AP")
   private String id;
 
-  @Schema (description = "Peppol Participant ID of the sender",
-           example = "iso6523-actorid-upis::0088:senderbackend")
+  @Schema (description = "Peppol Participant ID of the sender", example = "iso6523-actorid-upis::0088:senderbackend")
   private String senderID;
 
   @Schema (description = "Peppol Participant ID of the receiver",
@@ -54,8 +53,7 @@ public class InboundTransactionResponse
   @Schema (description = "AS4 Message ID from the inbound message")
   private String as4MessageID;
 
-  @Schema (description = "Peppol SBDH Instance Identifier",
-           example = "550e8400-e29b-41d4-a716-446655440000")
+  @Schema (description = "Peppol SBDH Instance Identifier", example = "550e8400-e29b-41d4-a716-446655440000")
   private String sbdhInstanceID;
 
   @Schema (description = "Peppol Seat ID of the sending AP (C2). Since v0.10.2.")
@@ -65,15 +63,19 @@ public class InboundTransactionResponse
   private String c3SeatID;
 
   @Schema (description = "Current transaction status",
-           allowableValues = { "received", "rejected", "forwarding", "forwarded", "forward_failed",
+           allowableValues = { "received",
+                               "rejected",
+                               "verification_deferred",
+                               "forwarding",
+                               "forwarded",
+                               "forward_failed",
                                "permanently_failed" })
   private String status;
 
   @Schema (description = "Total number of forwarding attempts")
   private int attemptCount;
 
-  @Schema (description = "When the message was received (ISO-8601, UTC)",
-           example = "2026-03-27T14:30:00Z")
+  @Schema (description = "When the message was received (ISO-8601, UTC)", example = "2026-03-27T14:30:00Z")
   private String receivedDT;
 
   @Schema (description = "When the transaction was successfully completed; null if not yet completed",
@@ -82,7 +84,7 @@ public class InboundTransactionResponse
   private String completedDT;
 
   @Schema (description = "Whether Peppol Reporting has been triggered",
-           allowableValues = { "pending", "reported" })
+           allowableValues = { "pending", "reported", "excluded" })
   private String reportingStatus;
 
   @Schema (description = "Planned date/time of the next forwarding retry; null unless status is forward_failed",
@@ -107,6 +109,17 @@ public class InboundTransactionResponse
            allowableValues = { "RE", "AP", "AB" },
            nullable = true)
   private String mlsResponseCode;
+
+  @Schema (description = "Verdict of the inbound document verification; null if no verification was performed (yet). " +
+                         "Independent of the status, so it also survives a forwarding. Since v0.12.0.",
+           allowableValues = { "passed", "rejected", "unverified" },
+           nullable = true)
+  private String verificationResult;
+
+  @Schema (description = "Findings of the verification as a JSON array of VerificationIssue objects; " +
+                         "null if the verifier provided none. On a passed verification these are warnings. Since v0.12.0.",
+           nullable = true)
+  private String verificationDetails;
 
   /**
    * Default constructor for JSON deserialization.
@@ -145,6 +158,8 @@ public class InboundTransactionResponse
     ret.isDuplicateAS4 = aTx.isDuplicateAS4 ();
     ret.isDuplicateSBDH = aTx.isDuplicateSBDH ();
     ret.mlsResponseCode = aTx.getMlsResponseCode () != null ? aTx.getMlsResponseCode ().getID () : null;
+    ret.verificationResult = aTx.getVerificationResult () != null ? aTx.getVerificationResult ().getID () : null;
+    ret.verificationDetails = aTx.getVerificationDetails ();
     return ret;
   }
 
@@ -461,10 +476,51 @@ public class InboundTransactionResponse
   }
 
   /**
+   * @return the verification verdict, or <code>null</code> if no verification was performed
+   * @since v0.12.0
+   */
+  public String getVerificationResult ()
+  {
+    return verificationResult;
+  }
+
+  /**
+   * @param s
+   *        The verification verdict to set.
+   * @since v0.12.0
+   */
+  public void setVerificationResult (final String s)
+  {
+    verificationResult = s;
+  }
+
+  /**
+   * @return the findings of the verification as a JSON array string, or <code>null</code> if the
+   *         verifier provided none
+   * @since v0.12.0
+   */
+  public String getVerificationDetails ()
+  {
+    return verificationDetails;
+  }
+
+  /**
+   * @param s
+   *        The details of the verification verdict to set.
+   * @since v0.12.0
+   */
+  public void setVerificationDetails (final String s)
+  {
+    verificationDetails = s;
+  }
+
+  /**
    * @return This response as a ph-json {@link IJsonObject}. Never <code>null</code>.
+   * @since v0.12.0 - was previously called <code>getAsJson</code>
    */
   @NonNull
-  public IJsonObject getAsJson ()
+  @Schema (hidden = true)
+  public IJsonObject toJson ()
   {
     final IJsonObject ret = new JsonObject ();
     if (id != null)
@@ -504,6 +560,10 @@ public class InboundTransactionResponse
     ret.add ("isDuplicateSBDH", isDuplicateSBDH);
     if (mlsResponseCode != null)
       ret.add ("mlsResponseCode", mlsResponseCode);
+    if (verificationResult != null)
+      ret.add ("verificationResult", verificationResult);
+    if (verificationDetails != null)
+      ret.add ("verificationDetails", verificationDetails);
     return ret;
   }
 }

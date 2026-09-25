@@ -16,34 +16,42 @@
  */
 package com.helger.phoss.ap.core.inbound;
 
+import java.io.InputStream;
 import java.security.cert.X509Certificate;
 import java.time.Duration;
 import java.time.OffsetDateTime;
-import java.util.Locale;
+import java.util.List;
 
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.w3c.dom.Element;
 
 import com.helger.annotation.concurrent.Immutable;
 import com.helger.annotation.style.ReturnsMutableCopy;
 import com.helger.annotation.style.VisibleForTesting;
+import com.helger.base.enforce.ValueEnforcer;
+import com.helger.base.state.EContinue;
 import com.helger.base.state.ESuccess;
 import com.helger.base.string.StringHelper;
+import com.helger.base.wrapper.Wrapper;
 import com.helger.cache.regex.RegExHelper;
 import com.helger.collection.commons.CommonsArrayList;
 import com.helger.collection.commons.ICommonsList;
 import com.helger.diagnostics.error.IError;
 import com.helger.diagnostics.error.list.ErrorList;
+import com.helger.peppol.mls.CPeppolMLS;
 import com.helger.peppol.mls.PeppolMLSBuilder;
 import com.helger.peppol.mls.PeppolMLSMarshaller;
 import com.helger.peppol.reporting.api.CPeppolReporting;
 import com.helger.peppol.sbdh.EPeppolMLSType;
 import com.helger.peppol.sbdh.PeppolSBDHData;
+import com.helger.peppol.sbdh.PeppolSBDHDataReader;
 import com.helger.peppolid.CIdentifier;
 import com.helger.peppolid.IDocumentTypeIdentifier;
 import com.helger.peppolid.IProcessIdentifier;
+import com.helger.peppolid.factory.IIdentifierFactory;
 import com.helger.peppolid.peppol.PeppolIdentifierHelper;
 import com.helger.peppolid.peppol.spis.SPIDHelper;
 import com.helger.phoss.ap.api.CPhossAP;
@@ -51,13 +59,23 @@ import com.helger.phoss.ap.api.IInboundForwardingAttemptManager;
 import com.helger.phoss.ap.api.IInboundTransactionManager;
 import com.helger.phoss.ap.api.codelist.EDuplicateDetectionMode;
 import com.helger.phoss.ap.api.codelist.EInboundStatus;
+import com.helger.phoss.ap.api.codelist.EMlsSendingTrigger;
+import com.helger.phoss.ap.api.codelist.EVerificationFailMode;
+import com.helger.phoss.ap.api.codelist.EVerificationIssueLevel;
+import com.helger.phoss.ap.api.codelist.EVerificationOutcomeCategory;
+import com.helger.phoss.ap.api.codelist.EVerificationRejectionForwarding;
+import com.helger.phoss.ap.api.codelist.EVerificationResult;
 import com.helger.phoss.ap.api.datetime.IAPTimestampManager;
 import com.helger.phoss.ap.api.mgr.IDocumentForwarder;
 import com.helger.phoss.ap.api.mgr.IDocumentPayloadManager;
+import com.helger.phoss.ap.api.model.ForwardableDocument;
 import com.helger.phoss.ap.api.model.ForwardingResult;
 import com.helger.phoss.ap.api.model.IInboundTransaction;
 import com.helger.phoss.ap.api.model.MlsOutcome;
 import com.helger.phoss.ap.api.model.MlsOutcomeIssue;
+import com.helger.phoss.ap.api.model.VerificationIssue;
+import com.helger.phoss.ap.api.model.VerificationOutcome;
+import com.helger.phoss.ap.api.model.VerifierResult;
 import com.helger.phoss.ap.api.otel.CPhossAPOtel;
 import com.helger.phoss.ap.api.spi.IInboundDocumentVerifierSPI;
 import com.helger.phoss.ap.api.spi.IPeppolReceiverCheckSPI;
@@ -87,6 +105,23 @@ import oasis.names.specification.ubl.schema.xsd.applicationresponse_21.Applicati
 @Immutable
 public final class InboundOrchestrator
 {
+  /**
+   * The prefix used in the <code>error_details</code> of an inbound transaction, if a document
+   * verifier backend service was unavailable.
+   *
+   * @since 0.12.0
+   */
+  public static final String ERROR_DETAILS_VERIFIER_UNAVAILABLE = "VERIFIER_UNAVAILABLE";
+  /**
+   * The prefix used in the <code>error_details</code> of an inbound transaction, if a document
+   * verifier rejected the document.
+   *
+   * @since 0.12.0
+   */
+  public static final String ERROR_DETAILS_VERIFICATION_REJECTED = "VERIFICATION_REJECTED";
+
+  private static final String EXPECTED_MLS_PREFIX = SPIDHelper.SPIS_PARTICIPANT_ID_SCHEME + ":";
+
   private static final Logger LOGGER = LoggerFactory.getLogger (InboundOrchestrator.class);
 
   private InboundOrchestrator ()
@@ -94,10 +129,10 @@ public final class InboundOrchestrator
 
   /**
    * Determine the valid <code>MLS_TO</code> participant identifier (URI encoded) from the provided
-   * SBDH <code>MLS_TO</code> scheme and value. Implements the MLS SPOG section 5.1 checks: the value
-   * must use the SPIS participant identifier scheme, be syntactically valid, and its Main ID must
-   * correlate to the sending C2's SPID Main ID (derived from the AP certificate Seat ID) - since
-   * redirecting an MLS to a different Service Provider is not allowed.
+   * SBDH <code>MLS_TO</code> scheme and value. Implements the MLS SPOG section 5.1 checks: the
+   * value must use the SPIS participant identifier scheme, be syntactically valid, and its Main ID
+   * must correlate to the sending C2's SPID Main ID (derived from the AP certificate Seat ID) -
+   * since redirecting an MLS to a different Service Provider is not allowed.
    *
    * @param sScheme
    *        The <code>MLS_TO</code> scheme from the SBDH. May be <code>null</code>.
@@ -119,16 +154,17 @@ public final class InboundOrchestrator
       return null;
 
     // Value must be syntactically valid as an SPIS participant identifier
-    if (sValue == null ||
-        !sValue.startsWith (SPIDHelper.SPIS_PARTICIPANT_ID_SCHEME + ":") ||
-        sValue.length () <= 5 ||
-        !RegExHelper.stringMatchesPattern (SPIDHelper.REGEX_COMPLETE, sValue.substring (5)))
+    if (sValue == null || sValue.length () <= EXPECTED_MLS_PREFIX.length () || !sValue.startsWith (EXPECTED_MLS_PREFIX))
+      return null;
+
+    final String sSpidValue = sValue.substring (EXPECTED_MLS_PREFIX.length ());
+    // Value must be syntactically valid as an SPIS participant identifier
+    if (!RegExHelper.stringMatchesPattern (SPIDHelper.REGEX_COMPLETE, sSpidValue))
       return null;
 
     // MLS SPOG section 5.1: the MLS_TO Main ID must correlate to the sending C2's SPID Main ID
-    final String sMlsToMainID = sValue.substring (5, 5 + 6);
-    final String sC2SpidPart = sC2SeatID != null && sC2SeatID.length () >= 3 ? sC2SeatID.substring (3) : "";
-    final String sC2MainID = sC2SpidPart.length () >= 6 ? sC2SpidPart.substring (0, 6) : sC2SpidPart;
+    final String sMlsToMainID = SPIDHelper.getMainID (sSpidValue);
+    final String sC2MainID = SPIDHelper.getMainIDFromSeatID (sC2SeatID);
     if (!sMlsToMainID.equalsIgnoreCase (sC2MainID))
       return null;
 
@@ -157,6 +193,833 @@ public final class InboundOrchestrator
                                            bIsDuplicateAS4,
                                            bIsDuplicateSBDH,
                                            sErrorDetails);
+  }
+
+  /**
+   * Get all findings of the provided verifier result as MLS line responses, independent of the
+   * response code they will be attached to. This is the single point where the transport-neutral
+   * {@link VerificationIssue}s are projected onto the Peppol MLS format - deliberately here and not
+   * on {@link VerifierResult} itself, because MLS is how C3 answers C2 about a <em>received</em>
+   * document and is meaningless for the outbound direction, which shares that type.
+   *
+   * @param aVR
+   *        The verifier result. May not be <code>null</code>.
+   * @return Never <code>null</code> but maybe empty.
+   */
+  @NonNull
+  @ReturnsMutableCopy
+  @VisibleForTesting
+  static ICommonsList <MlsOutcomeIssue> getAllMlsIssues (@NonNull final VerifierResult aVR)
+  {
+    return aVR.outcome ().getAllIssues ().getAllMapped (MlsOutcomeIssue::fromVerificationIssue);
+  }
+
+  /**
+   * Get the MLS details to be sent to C2 when the AP rejects the document. The response code is
+   * always RE, because this is only called once the rejection has been decided - but the findings
+   * only become the <em>reason</em> of the rejection if at least one of them is an
+   * {@link EVerificationIssueLevel#ERROR}. Warnings alone never explain a rejection, so in that
+   * case a synthesized error line response naming the verifier is used and the warnings are
+   * appended to it.
+   * <p>
+   * The individual severities survive the projection: an error becomes SV or BV and a warning
+   * becomes BW.
+   * </p>
+   *
+   * @param aVR
+   *        The verifier result. May not be <code>null</code>.
+   * @return Never <code>null</code>.
+   */
+  @NonNull
+  @VisibleForTesting
+  static MlsOutcome getRejectionMlsOutcome (@NonNull final VerifierResult aVR)
+  {
+    final ICommonsList <VerificationIssue> aIssues = aVR.outcome ().getAllIssues ();
+    if (aIssues.containsAny (VerificationIssue::isError))
+    {
+      // At least one fatal finding - those are the reason of the rejection
+      final String sResponseText = StringHelper.getNotNull (aVR.outcome ().getMessage (),
+                                                            "Document verification failed");
+      return MlsOutcome.rejection (sResponseText, getAllMlsIssues (aVR));
+    }
+
+    final String sMessage = StringHelper.getNotNull (aVR.outcome ().getMessage (), "no details available");
+    final String sReason = aVR.outcome ().isServiceUnavailable () ? "' is unavailable: " : "' rejected the document: ";
+    // Yes, Business Rule Violation is a stretch ...
+    final ICommonsList <MlsOutcomeIssue> aMlsIssues = new CommonsArrayList <> (MlsOutcomeIssue.businessRuleViolation (CPeppolMLS.LINE_ID_NOT_AVAILABLE,
+                                                                                                                      "The document verifier '" +
+                                                                                                                                                        aVR.verifierName () +
+                                                                                                                                                        sReason +
+                                                                                                                                                        sMessage));
+    // A verifier that rejects with warnings only is contradictory - keep them as extra details
+    aMlsIssues.addAll (getAllMlsIssues (aVR));
+    return MlsOutcome.rejection (aVR.outcome ().isServiceUnavailable () ? "Document verification could not be performed"
+                                                                        : "Document verification failed", aMlsIssues);
+  }
+
+  /**
+   * Run all registered inbound document verifiers. A verifier that rejects the document wins
+   * immediately. An unavailable verifier is only remembered - the remaining verifiers are still
+   * evaluated, so that the rejection of another verifier takes precedence over the unavailability.
+   *
+   * @param sLogPrefix
+   *        Log message prefix. May not be <code>null</code>.
+   * @param aVerifiers
+   *        The verifiers to be evaluated, in the order of their evaluation. May not be
+   *        <code>null</code>.
+   * @param sDocumentPath
+   *        The path of the stored document. May not be <code>null</code>.
+   * @param aDocTypeID
+   *        The document type identifier. May not be <code>null</code>.
+   * @param aProcessID
+   *        The process identifier. May not be <code>null</code>.
+   * @return The aggregated result. Never <code>null</code>.
+   */
+  @NonNull
+  @VisibleForTesting
+  static VerifierResult runInboundVerifiers (@NonNull final String sLogPrefix,
+                                             @NonNull final Iterable <? extends IInboundDocumentVerifierSPI> aVerifiers,
+                                             @NonNull final String sDocumentPath,
+                                             @NonNull final IDocumentTypeIdentifier aDocTypeID,
+                                             @NonNull final IProcessIdentifier aProcessID)
+  {
+    VerifierResult aUnavailable = null;
+    final ICommonsList <VerificationIssue> aWarnings = new CommonsArrayList <> ();
+
+    for (final IInboundDocumentVerifierSPI aVerifier : aVerifiers)
+    {
+      final String sVerifierName = aVerifier.getVerifierName ();
+      final String sVerifierID = aVerifier.getID ();
+      final VerificationOutcome aOutcome = aVerifier.verifyInboundDocument (sDocumentPath, aDocTypeID, aProcessID);
+      if (aOutcome == null)
+      {
+        // The SPI contract demands a non-null outcome, but it is not enforced at runtime - be
+        // resilient and treat it like a passed verification, as the old API did for "null"
+        LOGGER.warn (sLogPrefix +
+                     "The inbound document verifier '" +
+                     sVerifierName +
+                     "' returned no outcome - treating the document as verified");
+        continue;
+      }
+
+      switch (aOutcome.getCategory ())
+      {
+        case SERVICE_UNAVAILABLE:
+        {
+          LOGGER.warn (sLogPrefix +
+                       "The inbound document verifier '" +
+                       sVerifierName +
+                       "' is unavailable: " +
+                       aOutcome.getMessage ());
+
+          // Remember the first unavailable verifier only, but evaluate the remaining ones as well
+          if (aUnavailable == null)
+            aUnavailable = new VerifierResult (sVerifierID, sVerifierName, aOutcome);
+          break;
+        }
+        case REJECTION:
+        {
+          // An explicit rejection always wins
+          return new VerifierResult (sVerifierID, sVerifierName, aOutcome);
+        }
+        case PASSED:
+        {
+          // Successful verification - keep the findings of an accepting verifier, they are
+          // reported to C2 as line responses of the positive MLS
+          aWarnings.addAll (aOutcome.getAllIssues ());
+        }
+      }
+    }
+
+    if (aUnavailable != null)
+      return aUnavailable;
+
+    return VerifierResult.passed (VerificationOutcome.passed (aWarnings));
+  }
+
+  /**
+   * Render the findings of a verification for the <code>verification_details</code> column.
+   *
+   * @param aOutcome
+   *        The outcome whose findings are to be stored. May not be <code>null</code>.
+   * @return <code>null</code> if the verifier provided no individual findings.
+   */
+  @Nullable
+  private static String _getVerificationDetails (@NonNull final VerificationOutcome aOutcome)
+  {
+    return aOutcome.hasIssues () ? aOutcome.getAllIssuesAsJson ().getAsJsonString () : null;
+  }
+
+  /**
+   * Answer C2 with the negative MLS (RE) of a verification rejection and call the notification
+   * handlers. This is deliberately the last step of a rejection, so that a handler which re-reads
+   * the transaction sees the state it ends up in.
+   *
+   * @param aInboundTx
+   *        The affected inbound transaction. May not be <code>null</code>.
+   * @param aVR
+   *        The verifier result whose findings are sent as MLS to C2. May not be <code>null</code>.
+   * @param sReason
+   *        The human readable reason, passed on to the notification handlers. May not be
+   *        <code>null</code>.
+   * @since 0.12.0
+   */
+  private static void _answerVerificationRejection (@NonNull final IInboundTransaction aInboundTx,
+                                                    @NonNull final VerifierResult aVR,
+                                                    @NonNull final String sReason)
+  {
+    final MlsOutcome aMlsOutcome = getRejectionMlsOutcome (aVR);
+
+    // Don't send MLS as response to MLR or MLS
+    if (!CPhossAP.isMLR (aInboundTx.getDocTypeID (), aInboundTx.getProcessID ()) &&
+        !CPhossAP.isMLS (aInboundTx.getDocTypeID (), aInboundTx.getProcessID ()))
+    {
+      // Send asynchronously
+      PhotonWorkerPool.getInstance ().run ("send-mls", () -> {
+        // Send negative MLS (RE) back to C2 with the verifier's detailed outcome
+        MlsHandler.triggerSendingInboundResultMls (aInboundTx, aMlsOutcome);
+      });
+    }
+
+    // The outcome is handed out even if no MLS was sent - it describes the verdict and not the
+    // message, so a handler building a downstream report needs no second lookup
+    for (final var aHandler : APCoreMetaManager.getAllNotificationHandlers ())
+      aHandler.onInboundVerificationRejection (aInboundTx.getID (),
+                                               aInboundTx.getSbdhInstanceID (),
+                                               sReason,
+                                               aMlsOutcome);
+  }
+
+  /**
+   * Dispatch a copy of an inbound document to all provided document forwarders asynchronously. This
+   * has no effect on the inbound transaction at all: no status change, no forwarding attempt row
+   * and no retry. A forwarder that fails or throws is logged only and does not prevent the
+   * remaining ones from running.
+   *
+   * @param sLogPrefix
+   *        Log message prefix. May not be <code>null</code>.
+   * @param aInboundTx
+   *        The affected inbound transaction. May not be <code>null</code>.
+   * @param aForwarders
+   *        The document forwarders to dispatch to, in the order of their invocation. May not be
+   *        <code>null</code>. Nothing happens if it is empty.
+   * @param sTaskName
+   *        The name of the asynchronous worker pool task. May not be <code>null</code>.
+   * @param sSpanName
+   *        The name of the telemetry span opened per forwarder. May not be <code>null</code>.
+   * @param sLogLabel
+   *        The human readable label of the dispatch, used in the log messages. May not be
+   *        <code>null</code>.
+   * @since 0.12.0
+   */
+  private static void _dispatchFireAndForget (@NonNull final String sLogPrefix,
+                                              @NonNull final IInboundTransaction aInboundTx,
+                                              @NonNull final List <IDocumentForwarder> aForwarders,
+                                              @NonNull final String sTaskName,
+                                              @NonNull final String sSpanName,
+                                              @NonNull final String sLogLabel)
+  {
+    if (aForwarders.isEmpty ())
+      return;
+
+    // Adapt once - all forwarders of this dispatch see the very same document
+    final ForwardableDocument aForwardableDoc = ForwardableDocument.fromInbound (aInboundTx);
+
+    PhotonWorkerPool.getInstance ().run (sTaskName, () -> {
+      int nIndex = 0;
+      for (final IDocumentForwarder aForwarder : aForwarders)
+      {
+        nIndex++;
+        try (final ITelemetrySpan aSpan = Telemetry.startSpan (sSpanName, ETelemetrySpanKind.PRODUCER)
+                                                   .setAttribute (CPhossAPOtel.ATTR_TRANSACTION_ID, aInboundTx.getID ())
+                                                   .setAttribute (CPhossAPOtel.ATTR_SBDH_INSTANCE_ID,
+                                                                  aInboundTx.getSbdhInstanceID ())
+                                                   .setAttribute (CPhossAPOtel.ATTR_FORWARDER_INDEX, nIndex))
+        {
+          try
+          {
+            final ForwardingResult aResult = aForwarder.forwardDocument (aForwardableDoc);
+            if (aResult.isSuccess ())
+            {
+              LOGGER.info (sLogPrefix +
+                           sLogLabel +
+                           " #" +
+                           nIndex +
+                           " successful for transaction '" +
+                           aInboundTx.getID () +
+                           "'");
+              aSpan.setStatusOk ();
+            }
+            else
+            {
+              LOGGER.warn (sLogPrefix +
+                           sLogLabel +
+                           " #" +
+                           nIndex +
+                           " failed (ignored) for transaction '" +
+                           aInboundTx.getID () +
+                           "': " +
+                           aResult.getErrorDetails ());
+              aSpan.setStatusError (aResult.getErrorDetails ());
+            }
+          }
+          catch (final Exception ex)
+          {
+            // Catch everything so a failing forwarder does not prevent the others from running.
+            LOGGER.error (sLogPrefix +
+                          sLogLabel +
+                          " #" +
+                          nIndex +
+                          " threw exception (ignored) for transaction '" +
+                          aInboundTx.getID () +
+                          "'",
+                          ex);
+            aSpan.recordException (ex).setStatusError (ex.getMessage ());
+          }
+        }
+      }
+    });
+  }
+
+  /**
+   * Dispatch a fire-and-forget copy of a rejected inbound document to the primary and to all
+   * secondary document forwarders. Nothing of this touches the inbound transaction: no status
+   * change, no forwarding attempt row and no retry - a failing forwarder is logged only.
+   *
+   * @param sLogPrefix
+   *        Log message prefix. May not be <code>null</code>.
+   * @param aInboundTx
+   *        The affected inbound transaction. May not be <code>null</code>.
+   * @since 0.12.0
+   */
+  private static void _forwardRejectedBestEffort (@NonNull final String sLogPrefix,
+                                                  @NonNull final IInboundTransaction aInboundTx)
+  {
+    final ICommonsList <IDocumentForwarder> aForwarders = new CommonsArrayList <> ();
+    final IDocumentForwarder aPrimaryForwarder = APCoreMetaManager.getForwarder ();
+    if (aPrimaryForwarder != null)
+      aForwarders.add (aPrimaryForwarder);
+    aForwarders.addAll (APCoreMetaManager.getAllSecondaryForwarders ());
+
+    if (aForwarders.isEmpty ())
+    {
+      LOGGER.warn (sLogPrefix +
+                   "No document forwarder is configured - not dispatching the rejected document '" +
+                   aInboundTx.getSbdhInstanceID () +
+                   "'");
+      return;
+    }
+
+    LOGGER.info (sLogPrefix +
+                 "Dispatching a best-effort copy of the rejected document '" +
+                 aInboundTx.getSbdhInstanceID () +
+                 "' to " +
+                 aForwarders.size () +
+                 " forwarder(s)");
+    _dispatchFireAndForget (sLogPrefix,
+                            aInboundTx,
+                            aForwarders,
+                            "forward-rejected",
+                            CPhossAPOtel.SPAN_INBOUND_FORWARD_REJECTED,
+                            "Best-effort forwarding");
+  }
+
+  /**
+   * Reject an inbound document, because it did not pass the verification: record the verdict, apply
+   * the configured {@link EVerificationRejectionForwarding} and answer C2 with the negative MLS
+   * (RE). The rejection itself is recorded in any case - the mode only decides if and how the
+   * document nevertheless reaches C4. The forwarding attempt count is never touched here, because
+   * no regular forwarding was performed yet.
+   *
+   * @param sLogPrefix
+   *        Log message prefix. May not be <code>null</code>.
+   * @param aInboundTx
+   *        The affected inbound transaction. May not be <code>null</code>.
+   * @param aVR
+   *        The verifier result that led to the rejection. May not be <code>null</code>.
+   * @param sErrorDetails
+   *        The error details to be stored in the DB. Deliberately unused if the document runs
+   *        through the regular forwarding, because that overwrites them anyway. May not be
+   *        <code>null</code>.
+   * @param sReason
+   *        The human readable reason, used for logging and for the notification handlers. May not
+   *        be <code>null</code>.
+   * @return <code>EContinue.CONTINUE</code> if the rejected document must still run through the
+   *         regular forwarding, <code>EContinue.BREAK</code> otherwise.
+   */
+  @NonNull
+  private static EContinue _rejectAfterVerification (@NonNull final String sLogPrefix,
+                                                     @NonNull final IInboundTransaction aInboundTx,
+                                                     @NonNull final VerifierResult aVR,
+                                                     @NonNull final String sErrorDetails,
+                                                     @NonNull final String sReason)
+  {
+    final IInboundTransactionManager aTxMgr = APJdbcMetaManager.getInboundTransactionMgr ();
+    final String sTxID = aInboundTx.getID ();
+    final EVerificationRejectionForwarding eMode = APCoreConfig.getVerificationRejectionForwarding ();
+
+    LOGGER.warn (sLogPrefix +
+                 "Inbound document verification failed for '" +
+                 aInboundTx.getSbdhInstanceID () +
+                 "': " +
+                 sReason);
+
+    // Record the verdict separately from the status, so that it survives a later forwarding and is
+    // not cleared together with the error details on completion. The details are the neutral
+    // findings, not their MLS projection - MLS is only how C2 is answered
+    aTxMgr.updateVerificationResult (sTxID, EVerificationResult.REJECTED, _getVerificationDetails (aVR.outcome ()));
+
+    if (eMode == EVerificationRejectionForwarding.RETRY)
+    {
+      // The status is left to the forwarding state machine from here on - the rejection stays
+      // visible in the "verification_result" column, which no forwarding status transition touches
+      LOGGER.info (sLogPrefix +
+                   "Forwarding the rejected document '" +
+                   aInboundTx.getSbdhInstanceID () +
+                   "' to C4 anyway, because the rejection forwarding mode is '" +
+                   eMode.getID () +
+                   "'");
+      _answerVerificationRejection (aInboundTx, aVR, sReason);
+      return EContinue.CONTINUE;
+    }
+
+    // The transaction is terminal in the modes "none" and "best-effort"
+    aTxMgr.updateStatusAndNextRetry (sTxID, EInboundStatus.REJECTED, null, sErrorDetails);
+
+    _answerVerificationRejection (aInboundTx, aVR, sReason);
+
+    if (eMode == EVerificationRejectionForwarding.BEST_EFFORT)
+      _forwardRejectedBestEffort (sLogPrefix, aInboundTx);
+
+    return EContinue.BREAK;
+  }
+
+  /**
+   * Defer the verification of an inbound document, because a verifier backend service is
+   * unavailable. If the document was received longer ago than the configured maximum deferral
+   * duration, it is rejected instead, so that C2 finally gets an answer. The forwarding attempt
+   * count is deliberately left unchanged, because the deferred verification is retried
+   * independently of the forwarding.
+   *
+   * @param sLogPrefix
+   *        Log message prefix. May not be <code>null</code>.
+   * @param aInboundTx
+   *        The affected inbound transaction. May not be <code>null</code>.
+   * @param aVR
+   *        The verifier result of category {@link EVerificationOutcomeCategory#SERVICE_UNAVAILABLE}
+   *        . May not be <code>null</code>.
+   * @return <code>EContinue.CONTINUE</code> only if the maximum deferral duration was exceeded and
+   *         the resulting rejection is nevertheless forwarded to C4, see
+   *         {@link EVerificationRejectionForwarding}. <code>EContinue.BREAK</code> otherwise.
+   */
+  @NonNull
+  private static EContinue _deferVerification (@NonNull final String sLogPrefix,
+                                               @NonNull final IInboundTransaction aInboundTx,
+                                               @NonNull final VerifierResult aVR)
+  {
+    final IInboundTransactionManager aTxMgr = APJdbcMetaManager.getInboundTransactionMgr ();
+    final OffsetDateTime aNow = APBasicMetaManager.getTimestampMgr ().getCurrentDateTimeUTC ();
+
+    final String sErrorDetails = ERROR_DETAILS_VERIFIER_UNAVAILABLE +
+                                 " [" +
+                                 aVR.verifierName () +
+                                 "]: " +
+                                 StringHelper.getNotNull (aVR.outcome ().getMessage (), "Verifier unavailable");
+    final Duration aMaxDuration = APCoreConfig.getVerificationDeferredMaxDuration ();
+    final OffsetDateTime aDeadline = aInboundTx.getReceivedDT ().plus (aMaxDuration);
+
+    if (!aNow.isBefore (aDeadline))
+    {
+      // Deferring forever is not an option - C2 needs a final answer
+      final String sReason = "The document verifier '" +
+                             aVR.verifierName () +
+                             "' was unavailable for more than " +
+                             aMaxDuration;
+      return _rejectAfterVerification (sLogPrefix,
+                                       aInboundTx,
+                                       aVR,
+                                       sErrorDetails + " (maximum deferral duration of " + aMaxDuration + " exceeded)",
+                                       sReason);
+    }
+
+    // Never schedule the next re-verification beyond the deadline, so that the rejection happens at
+    // the first scheduler cycle at or after it and not one full retry interval later
+    OffsetDateTime aNextRetry = aNow.plus (APCoreConfig.getVerificationDeferredRetryInterval ());
+    if (aNextRetry.isAfter (aDeadline))
+      aNextRetry = aDeadline;
+
+    LOGGER.warn (sLogPrefix +
+                 "Deferring the verification of inbound document '" +
+                 aInboundTx.getSbdhInstanceID () +
+                 "' until " +
+                 aNextRetry +
+                 ", because the verifier '" +
+                 aVR.verifierName () +
+                 "' is unavailable");
+
+    aTxMgr.updateStatusAndNextRetry (aInboundTx.getID (),
+                                     EInboundStatus.VERIFICATION_DEFERRED,
+                                     aNextRetry,
+                                     sErrorDetails);
+
+    // Fired on every deferral - this is the signal that a verifier needs operator attention
+    for (final var aHandler : APCoreMetaManager.getAllNotificationHandlers ())
+      aHandler.onInboundVerificationDeferred (aInboundTx.getID (),
+                                              aInboundTx.getSbdhInstanceID (),
+                                              aVR.verifierName (),
+                                              aNextRetry,
+                                              sErrorDetails);
+    return EContinue.BREAK;
+  }
+
+  /**
+   * Apply the configured {@link EVerificationFailMode} onto the provided verifier result and update
+   * the inbound transaction accordingly.
+   *
+   * @param sLogPrefix
+   *        Log message prefix. May not be <code>null</code>.
+   * @param aInboundTx
+   *        The affected inbound transaction. May not be <code>null</code>.
+   * @param aVR
+   *        The verifier result to be handled. May not be <code>null</code>.
+   * @return <code>EContinue.CONTINUE</code> if the processing of the document may continue,
+   *         <code>EContinue.BREAK</code> if the document was rejected and is not forwarded, or if
+   *         its verification was deferred. A rejected document may continue as well, if
+   *         {@link EVerificationRejectionForwarding#RETRY} is configured.
+   */
+  @VisibleForTesting
+  static @NonNull EContinue handleVerifierResult (@NonNull final String sLogPrefix,
+                                                  @NonNull final IInboundTransaction aInboundTx,
+                                                  @NonNull final VerifierResult aVR)
+  {
+    if (aVR.outcome ().isRejected ())
+    {
+      final String sText = StringHelper.getNotNull (aVR.outcome ().getMessage (), "Verification failed");
+      return _rejectAfterVerification (sLogPrefix,
+                                       aInboundTx,
+                                       aVR,
+                                       ERROR_DETAILS_VERIFICATION_REJECTED + " [" + aVR.verifierName () + "]: " + sText,
+                                       "The document verifier '" + aVR.verifierName () + "' rejected the document");
+    }
+
+    if (aVR.outcome ().isServiceUnavailable ())
+    {
+      final EVerificationFailMode eFailMode = APCoreConfig.getVerificationFailMode ();
+      return switch (eFailMode)
+      {
+        case DEFERRED -> _deferVerification (sLogPrefix, aInboundTx, aVR);
+        case OPEN ->
+        {
+          // Deliberately no "verification accepted" callback - nothing was verified at all
+          LOGGER.warn (sLogPrefix +
+                       "The document verifier '" +
+                       aVR.verifierName () +
+                       "' is unavailable, but the fail mode is '" +
+                       eFailMode.getID () +
+                       "' - forwarding the unverified document '" +
+                       aInboundTx.getSbdhInstanceID () +
+                       "'");
+          // Remember that this document was never inspected - otherwise a forwarded document is
+          // indistinguishable from a properly verified one
+          APJdbcMetaManager.getInboundTransactionMgr ()
+                           .updateVerificationResult (aInboundTx.getID (),
+                                                      EVerificationResult.UNVERIFIED,
+                                                      _getVerificationDetails (aVR.outcome ()));
+          yield EContinue.CONTINUE;
+        }
+        default ->
+        {
+          // CLOSED - handle it like a rejection
+          final String sText = StringHelper.getNotNull (aVR.outcome ().getMessage (), "Verifier unavailable");
+          final String sReason = "The document verifier '" +
+                                 aVR.verifierName () +
+                                 "' is unavailable and the fail mode is '" +
+                                 eFailMode.getID () +
+                                 "'";
+          yield _rejectAfterVerification (sLogPrefix,
+                                          aInboundTx,
+                                          aVR,
+                                          ERROR_DETAILS_VERIFIER_UNAVAILABLE +
+                                               " [" +
+                                               aVR.verifierName () +
+                                               "]: " +
+                                               sText,
+                                          sReason);
+        }
+      };
+    }
+
+    // All verifiers accepted
+    // The findings of an accepted document are warnings - keep them, they are also sent to C2 as
+    // line responses of the positive MLS
+    APJdbcMetaManager.getInboundTransactionMgr ()
+                     .updateVerificationResult (aInboundTx.getID (),
+                                                EVerificationResult.PASSED,
+                                                _getVerificationDetails (aVR.outcome ()));
+
+    for (final var aHandler : APCoreMetaManager.getAllLifecycleHandlers ())
+      aHandler.onInboundVerificationAccepted (aInboundTx.getID (), aInboundTx.getSbdhInstanceID ());
+    return EContinue.CONTINUE;
+  }
+
+  /**
+   * Run the optional inbound document verification for the provided transaction and handle its
+   * result.
+   *
+   * @param sLogPrefix
+   *        Log message prefix. May not be <code>null</code>.
+   * @param aInboundTx
+   *        The affected inbound transaction. May not be <code>null</code>.
+   * @param aDocTypeID
+   *        The document type identifier. May not be <code>null</code>.
+   * @param aProcessID
+   *        The process identifier. May not be <code>null</code>.
+   * @param aMlsWarningsHolder
+   *        Filled with the findings of a verification that did <b>not</b> reject the document, so
+   *        that they can be attached to the positive MLS. Only written on
+   *        <code>EContinue.CONTINUE</code>. May not be <code>null</code>.
+   * @return <code>EContinue.CONTINUE</code> if the processing of the document may continue,
+   *         <code>EContinue.BREAK</code> if the document was rejected or if its verification was
+   *         deferred.
+   */
+  private static @NonNull EContinue _verifyInboundDocument (@NonNull final String sLogPrefix,
+                                                            @NonNull final IInboundTransaction aInboundTx,
+                                                            @NonNull final IDocumentTypeIdentifier aDocTypeID,
+                                                            @NonNull final IProcessIdentifier aProcessID,
+                                                            @NonNull final Wrapper <ICommonsList <MlsOutcomeIssue>> aMlsWarningsHolder)
+  {
+    try (final ITelemetrySpan aVerifySpan = Telemetry.startSpan (CPhossAPOtel.SPAN_VERIFICATION,
+                                                                 ETelemetrySpanKind.INTERNAL)
+                                                     .setAttribute (CPhossAPOtel.ATTR_IS_OUTBOUND, false)
+                                                     .setAttribute (CPhossAPOtel.ATTR_TRANSACTION_ID,
+                                                                    aInboundTx.getID ())
+                                                     .setAttribute (CPhossAPOtel.ATTR_SBDH_INSTANCE_ID,
+                                                                    aInboundTx.getSbdhInstanceID ()))
+    {
+      final VerifierResult aVR = runInboundVerifiers (sLogPrefix,
+                                                      APCoreMetaManager.getAllInboundVerifiers (),
+                                                      aInboundTx.getDocumentPath (),
+                                                      aDocTypeID,
+                                                      aProcessID);
+      // Attribute the outcome to the verifier that caused it - a passed verification has no
+      // single responsible verifier and therefore no ID
+      if (aVR.hasVerifierID ())
+        aVerifySpan.setAttribute (CPhossAPOtel.ATTR_VERIFIER_ID, aVR.verifierID ());
+
+      if (aVR.outcome ().isRejected ())
+        aVerifySpan.setStatusError ("Inbound verification failed");
+      else
+        if (aVR.outcome ().isServiceUnavailable ())
+          aVerifySpan.setStatusError ("Inbound verifier service unavailable");
+
+      final EContinue eContinue = handleVerifierResult (sLogPrefix, aInboundTx, aVR);
+      if (eContinue.isContinue () && !aVR.outcome ().isRejected ())
+      {
+        // The document was accepted - any remaining findings are warnings and are reported to C2
+        // as line responses of the positive MLS. A rejected document that continues because of
+        // EVerificationRejectionForwarding.RETRY never gets a positive MLS, so its findings are
+        // deliberately not collected here - they were already sent as the negative MLS
+        aMlsWarningsHolder.set (getAllMlsIssues (aVR));
+      }
+      return eContinue;
+    }
+  }
+
+  /**
+   * Handle an incoming MLS document: parse it and correlate it with the referenced outbound
+   * transaction.
+   *
+   * @param sLogPrefix
+   *        Log message prefix. May not be <code>null</code>.
+   * @param aInboundTx
+   *        The inbound transaction of the MLS. May not be <code>null</code>.
+   * @param aBusinessMessage
+   *        The business message of the received SBD. May not be <code>null</code>.
+   * @param aProcessingErrors
+   *        The list of processing errors to be filled. May not be <code>null</code>.
+   * @return {@link ESuccess#FAILURE} if the MLS could not be interpreted and the processing of the
+   *         document must be stopped, {@link ESuccess#SUCCESS} otherwise.
+   */
+  @NonNull
+  private static ESuccess _handleIncomingMls (@NonNull final String sLogPrefix,
+                                              @NonNull final IInboundTransaction aInboundTx,
+                                              @NonNull final Element aBusinessMessage,
+                                              @NonNull final List <String> aProcessingErrors)
+  {
+    final IInboundTransactionManager aTxMgr = APJdbcMetaManager.getInboundTransactionMgr ();
+    final String sTxID = aInboundTx.getID ();
+    final String sSbdhInstanceID = aInboundTx.getSbdhInstanceID ();
+
+    LOGGER.info (sLogPrefix + "Handling incoming MLS message");
+
+    // Read as UBL ApplicationResponse
+    final ErrorList aXSDErrors = new ErrorList ();
+    final ApplicationResponseType aMLS = new PeppolMLSMarshaller ().setCollectErrors (aXSDErrors)
+                                                                   .read (aBusinessMessage);
+    if (aMLS == null)
+    {
+      LOGGER.error (sLogPrefix + "Failed to parse incoming MLS");
+      // Add all XSD errors to the output
+      for (final IError aError : aXSDErrors)
+      {
+        final String sDetails = "Peppol MLS XSD Issue: " + aError.getAsString (CPhossAP.DEFAULT_LOCALE);
+        aProcessingErrors.add (sDetails);
+      }
+      return ESuccess.FAILURE;
+    }
+
+    // Read as Peppol MLS
+    final PeppolMLSBuilder aBuilder = PeppolMLSBuilder.createForApplicationResponse (aMLS);
+
+    // The reference ID in the MLS is the SBDH Instance ID of the original
+    // outbound business document
+    final String sReferencedSbdhInstanceID = aBuilder.referenceId ();
+    if (StringHelper.isEmpty (sReferencedSbdhInstanceID))
+    {
+      LOGGER.error (sLogPrefix + "MLS message '" + sSbdhInstanceID + "' has no reference ID - cannot correlate");
+      aTxMgr.updateStatus (sTxID, EInboundStatus.PERMANENTLY_FAILED);
+      return ESuccess.FAILURE;
+    }
+
+    // Correlate with the original outbound transaction and update its MLS
+    // status
+    if (Telemetry.withSpan (CPhossAPOtel.SPAN_MLS_CORRELATE, ETelemetrySpanKind.INTERNAL, aCorrelateSpan -> {
+      aCorrelateSpan.setAttribute (CPhossAPOtel.ATTR_TRANSACTION_ID, sTxID)
+                    .setAttribute (CPhossAPOtel.ATTR_SBDH_INSTANCE_ID, sSbdhInstanceID)
+                    .setAttribute (CPhossAPOtel.ATTR_MLS_RESPONSE_CODE, aBuilder.responseCode ().getID ());
+      {
+        return MlsHandler.handleIncomingMls (sLogPrefix,
+                                             sReferencedSbdhInstanceID,
+                                             aBuilder.responseCode (),
+                                             aInboundTx.getAS4Timestamp (),
+                                             aBuilder.id (),
+                                             sTxID);
+      }
+    }).isFailure ())
+    {
+      // Call callbacks
+      for (final var aHandler : APCoreMetaManager.getAllNotificationHandlers ())
+        aHandler.onInboundMLSCorrelationError (sTxID, sReferencedSbdhInstanceID, aBuilder.responseCode ());
+    }
+    return ESuccess.SUCCESS;
+  }
+
+  /**
+   * Check if no further MLS may be sent to C2 for the provided transaction, because the negative
+   * MLS (RE) of a verification rejection was already sent for it. Such a transaction only exists if
+   * a rejected document is forwarded to C4, see {@link EVerificationRejectionForwarding}.
+   * <p>
+   * The suppression is deliberately derived from the persisted verdict and not from a parameter, so
+   * that the retry scheduler, the operations endpoint, the MLS sending endpoint and the MLS
+   * watchdog all behave exactly like the initial receive path.
+   * </p>
+   *
+   * @param aInboundTx
+   *        The affected inbound transaction. May not be <code>null</code>.
+   * @return <code>true</code> if no further MLS may be sent for this transaction.
+   * @since 0.12.0
+   */
+  public static boolean isMlsSuppressedAfterRejection (@NonNull final IInboundTransaction aInboundTx)
+  {
+    final EVerificationResult eVerificationResult = aInboundTx.getVerificationResult ();
+    return eVerificationResult != null && eVerificationResult.isRejected ();
+  }
+
+  /**
+   * Send the positive MLS to C2 after an inbound document was successfully forwarded to C4, if MLS
+   * sending is enabled for the transaction.
+   *
+   * @param aInboundTx
+   *        The successfully forwarded inbound transaction. May not be <code>null</code>.
+   * @param aMlsWarnings
+   *        The findings of the verification that accepted the document. May be <code>null</code> or
+   *        empty. MLS allows line responses on a positive response code, so they are reported to C2
+   *        instead of being dropped.
+   */
+  private static void _sendPositiveMlsAfterForwarding (@NonNull final IInboundTransaction aInboundTx,
+                                                       @Nullable final ICommonsList <MlsOutcomeIssue> aMlsWarnings)
+  {
+    if (isMlsSuppressedAfterRejection (aInboundTx))
+    {
+      // The document was forwarded although it was rejected - the negative MLS (RE) went out when
+      // the rejection was recorded and a positive MLS would contradict it
+      LOGGER.info ("Not sending a positive MLS for the rejected but forwarded inbound transaction '" +
+                   aInboundTx.getID () +
+                   "'");
+      return;
+    }
+
+    if (aInboundTx.getMlsType () == EPeppolMLSType.ALWAYS_SEND)
+    {
+      // Try to send back positive MLS
+      // Don't send MLS as response to MLS
+      if (!CPhossAP.isMLR (aInboundTx.getDocTypeID (), aInboundTx.getProcessID ()) &&
+          !CPhossAP.isMLS (aInboundTx.getDocTypeID (), aInboundTx.getProcessID ()))
+      {
+        if (APCoreConfig.getMlsSendingTrigger () == EMlsSendingTrigger.API)
+        {
+          // The Receiver Backend reports the outcome via POST /api/mls/send. If it stays silent,
+          // the watchdog of the retry scheduler sends the fallback MLS after
+          // "mls.sending.api.timeout"
+          LOGGER.info ("Deferring the positive MLS of the inbound transaction '" +
+                       aInboundTx.getID () +
+                       "' until the Receiver Backend reports the outcome");
+          return;
+        }
+
+        // Send asynchronously
+        PhotonWorkerPool.getInstance ().run ("send-mls", () -> {
+          // AP for delivery with confirmation (e.g. http), AB for delivery without
+          // confirmation (e.g. SFTP, S3, file system)
+          final MlsOutcome aOutcome = APCoreMetaManager.getForwarder ().isWithDeliveryConfirmation () ? MlsOutcome
+                                                                                                                  .acceptance (aMlsWarnings)
+                                                                                                      : MlsOutcome.acknowledging (null,
+                                                                                                                                  aMlsWarnings);
+          MlsHandler.triggerSendingInboundResultMls (aInboundTx, aOutcome);
+        });
+      }
+    }
+  }
+
+  /**
+   * Handle an inbound document that will never be forwarded to C4: send the MLS to C2 and call the
+   * notification handlers. The status of the transaction must already have been updated by the
+   * caller.
+   *
+   * @param aInboundTx
+   *        The affected inbound transaction. May not be <code>null</code>.
+   * @param sReason
+   *        The human readable reason, passed on to the notification handlers. May not be
+   *        <code>null</code>.
+   */
+  private static void _handlePermanentForwardingFailure (@NonNull final IInboundTransaction aInboundTx,
+                                                         @NonNull final String sReason)
+  {
+    if (isMlsSuppressedAfterRejection (aInboundTx))
+    {
+      // The forwarding of a rejected document failed - C2 was already answered with the negative
+      // MLS (RE) and must not receive a second, contradicting one
+      LOGGER.info ("Not sending an MLS for the failed forwarding of the rejected inbound transaction '" +
+                   aInboundTx.getID () +
+                   "'");
+    }
+    else
+      // Don't send MLS as response to MLR or MLS
+      if (!CPhossAP.isMLR (aInboundTx.getDocTypeID (), aInboundTx.getProcessID ()) &&
+          !CPhossAP.isMLS (aInboundTx.getDocTypeID (), aInboundTx.getProcessID ()))
+      {
+        // Send asynchronously
+        PhotonWorkerPool.getInstance ().run ("send-mls", () -> {
+          // Deliberately "acknowledging" (AB) and not a rejection with the status reason code "FD".
+          // The PNP reserves "FD" for a permanent inability to deliver, and we still assume that
+          // this problem is resolvable later - so phoss AP never sends "FD"
+          MlsHandler.triggerSendingInboundResultMls (aInboundTx,
+                                                     MlsOutcome.acknowledging ("Forwarding to C4 failed for now"));
+        });
+      }
+
+    for (final var aHandler : APCoreMetaManager.getAllNotificationHandlers ())
+      aHandler.onInboundPermanentForwardingFailure (aInboundTx.getID (), aInboundTx.getSbdhInstanceID (), sReason);
   }
 
   /**
@@ -205,7 +1068,6 @@ public final class InboundOrchestrator
         final IAPTimestampManager aTimestampMgr = APBasicMetaManager.getTimestampMgr ();
         final IInboundTransactionManager aInboundMgr = APJdbcMetaManager.getInboundTransactionMgr ();
         final IDocumentPayloadManager aDocPayloadMgr = APBasicMetaManager.getDocPayloadMgr ();
-        final Locale aDisplayLocale = CPhossAP.DEFAULT_LOCALE;
 
         final String sSenderID = aPeppolSBD.getSenderURIEncoded ();
         final String sReceiverID = aPeppolSBD.getReceiverURIEncoded ();
@@ -391,108 +1253,35 @@ public final class InboundOrchestrator
                                               bIsDuplicateSBDH);
 
         // Optional verification
+        final Wrapper <ICommonsList <MlsOutcomeIssue>> aMlsWarnings = new Wrapper <> ();
+        IInboundTransaction aVerifiedTx = aInboundTx;
         if (APCoreConfig.isVerificationInboundEnabled ())
         {
-          try (final ITelemetrySpan aVerifySpan = Telemetry.startSpan (CPhossAPOtel.SPAN_VERIFICATION,
-                                                                       ETelemetrySpanKind.INTERNAL)
-                                                           .setAttribute (CPhossAPOtel.ATTR_IS_OUTBOUND, false)
-                                                           .setAttribute (CPhossAPOtel.ATTR_TRANSACTION_ID, sTxID)
-                                                           .setAttribute (CPhossAPOtel.ATTR_SBDH_INSTANCE_ID,
-                                                                          sSbdhInstanceID))
-          {
-            // Call callbacks
-            for (final IInboundDocumentVerifierSPI aVerifier : APCoreMetaManager.getAllInboundVerifiers ())
-            {
-              final MlsOutcome aVerifierOutcome = aVerifier.verifyInboundDocument (sDocumentPath,
-                                                                                   aDocTypeID,
-                                                                                   aProcessID);
-              if (aVerifierOutcome != null && aVerifierOutcome.getResponseCode ().isFailure ())
-              {
-                aVerifySpan.setStatusError ("Inbound verification failed");
-                LOGGER.warn (sLogPrefix + "Inbound document verification failed for '" + sSbdhInstanceID + "'");
-                aInboundMgr.updateStatus (sTxID, EInboundStatus.REJECTED);
+          // No processing error is created here - a rejection is signaled via MLS and a deferred
+          // verification is picked up by the retry scheduler
+          if (_verifyInboundDocument (sLogPrefix, aInboundTx, aDocTypeID, aProcessID, aMlsWarnings).isBreak ())
+            return aProcessingErrors;
 
-                // Dop't send MLS as response to MLR or MLS
-                if (!CPhossAP.isMLR (aDocTypeID, aProcessID) && !CPhossAP.isMLS (aDocTypeID, aProcessID))
-                {
-                  // Send asynchronously
-                  PhotonWorkerPool.getInstance ().run ("send-mls", () -> {
-                    // Send negative MLS (RE) back to C2 with the verifier's detailed outcome
-                    MlsHandler.triggerSendingInboundResultMls (aInboundTx, aVerifierOutcome);
-                  });
-                }
-
-                // No processing error - MLS
-
-                for (final var aHandler : APCoreMetaManager.getAllNotificationHandlers ())
-                  aHandler.onInboundVerificationRejection (sTxID, sSbdhInstanceID, "Inbound verification failed");
-                return aProcessingErrors;
-              }
-            }
-
-            // All verifiers accepted
-            for (final var aHandler : APCoreMetaManager.getAllLifecycleHandlers ())
-              aHandler.onInboundVerificationAccepted (sTxID, sSbdhInstanceID);
-          }
+          // The verification wrote its verdict to the database, but this instance was loaded before
+          // it ran - so re-read it. Otherwise a rejected document that is forwarded because of
+          // EVerificationRejectionForwarding would still carry a "null" verification result and
+          // C2 would get a second MLS contradicting the RE that was already sent
+          aVerifiedTx = aInboundMgr.getByID (sTxID);
+          if (aVerifiedTx == null)
+            throw new IllegalStateException ("Failed to re-read the inbound transaction '" +
+                                             sTxID +
+                                             "' after its verification");
         }
 
         if (CPhossAP.isMLS (aDocTypeID, aProcessID))
         {
-          LOGGER.info (sLogPrefix + "Handling incoming MLS message");
-
-          // Read as UBL ApplicationResponse
-          final ErrorList aXSDErrors = new ErrorList ();
-          final ApplicationResponseType aMLS = new PeppolMLSMarshaller ().setCollectErrors (aXSDErrors)
-                                                                         .read (aPeppolSBD.getBusinessMessageNoClone ());
-          if (aMLS == null)
-          {
-            LOGGER.error (sLogPrefix + "Failed to parse incoming MLS");
-            // Add all XSD errors to the output
-            for (final IError aError : aXSDErrors)
-            {
-              final String sDetails = "Peppol MLS XSD Issue: " + aError.getAsString (aDisplayLocale);
-              aProcessingErrors.add (sDetails);
-            }
+          if (_handleIncomingMls (sLogPrefix, aVerifiedTx, aPeppolSBD.getBusinessMessageNoClone (), aProcessingErrors)
+                                                                                                                      .isFailure ())
             return aProcessingErrors;
-          }
-
-          // Read as Peppol MLS
-          final PeppolMLSBuilder aBuilder = PeppolMLSBuilder.createForApplicationResponse (aMLS);
-
-          // The reference ID in the MLS is the SBDH Instance ID of the original
-          // outbound business document
-          final String sReferencedSbdhInstanceID = aBuilder.referenceId ();
-          if (StringHelper.isEmpty (sReferencedSbdhInstanceID))
-          {
-            LOGGER.error (sLogPrefix + "MLS message '" + sSbdhInstanceID + "' has no reference ID - cannot correlate");
-            aInboundMgr.updateStatus (sTxID, EInboundStatus.PERMANENTLY_FAILED);
-            return aProcessingErrors;
-          }
-
-          // Correlate with the original outbound transaction and update its MLS
-          // status
-          if (Telemetry.withSpan (CPhossAPOtel.SPAN_MLS_CORRELATE, ETelemetrySpanKind.INTERNAL, aCorrelateSpan -> {
-            aCorrelateSpan.setAttribute (CPhossAPOtel.ATTR_TRANSACTION_ID, sTxID)
-                          .setAttribute (CPhossAPOtel.ATTR_SBDH_INSTANCE_ID, sSbdhInstanceID)
-                          .setAttribute (CPhossAPOtel.ATTR_MLS_RESPONSE_CODE, aBuilder.responseCode ().getID ());
-            {
-              return MlsHandler.handleIncomingMls (sLogPrefix,
-                                                   sReferencedSbdhInstanceID,
-                                                   aBuilder.responseCode (),
-                                                   aAS4Timestamp,
-                                                   aBuilder.id (),
-                                                   sTxID);
-            }
-          }).isFailure ())
-          {
-            // Call callbacks
-            for (final var aHandler : APCoreMetaManager.getAllNotificationHandlers ())
-              aHandler.onInboundMLSCorrelationError (sTxID, sReferencedSbdhInstanceID, aBuilder.responseCode ());
-          }
         }
 
         // Forward - Business Document and MLS
-        if (forwardDocument (sLogPrefix, aInboundTx).isFailure ())
+        if (forwardDocument (sLogPrefix, aVerifiedTx).isFailure ())
         {
           // Forwarding failed
 
@@ -502,23 +1291,7 @@ public final class InboundOrchestrator
         else
         {
           // Forwarding success
-          if (aInboundTx.getMlsType () == EPeppolMLSType.ALWAYS_SEND)
-          {
-            // Try to send back positive MLS
-            // Don't send MLS as response to MLS
-            if (!CPhossAP.isMLS (aDocTypeID, aProcessID))
-            {
-              // Send asynchronously
-              PhotonWorkerPool.getInstance ().run ("send-mls", () -> {
-                // AP for delivery with confirmation (e.g. http), AB for delivery without
-                // confirmation (e.g. SFTP, S3, file system)
-                final MlsOutcome aOutcome = APCoreMetaManager.getForwarder ().isWithDeliveryConfirmation () ? MlsOutcome
-                                                                                                                        .acceptance ()
-                                                                                                            : MlsOutcome.acknowledging ();
-                MlsHandler.triggerSendingInboundResultMls (aInboundTx, aOutcome);
-              });
-            }
-          }
+          _sendPositiveMlsAfterForwarding (aVerifiedTx, aMlsWarnings.get ());
         }
 
         return aProcessingErrors;
@@ -564,221 +1337,210 @@ public final class InboundOrchestrator
         final String sCircuitBreakerID = "phoss-ap-forwarder";
         if (CircuitBreakerManager.tryAcquirePermit (sCircuitBreakerID))
         {
-          final IDocumentForwarder aForwarder = APCoreMetaManager.getForwarder ();
-          if (aForwarder == null)
-          {
-            LOGGER.error (sLogPrefix + "Internal error - No document forwarder configured");
-            aTxMgr.updateStatus (aInboundTx.getID (), EInboundStatus.PERMANENTLY_FAILED);
-            return ESuccess.FAILURE;
-          }
-
-          // Set status
-          aTxMgr.updateStatus (aInboundTx.getID (), EInboundStatus.FORWARDING);
-
-          // Actual forwarding
-          ForwardingResult aResult;
+          // The permit was acquired, so from here on exactly one result must be recorded on
+          // every code path. A permit that is acquired but never recorded is never released
+          // again, and after "circuit-breaker.half-open-max-attempts" leaks a half-open circuit
+          // breaker rejects every further call until the application is restarted
+          boolean bResultRecorded = false;
           try
           {
-            aResult = aForwarder.forwardDocument (aInboundTx);
-          }
-          catch (final Exception ex)
-          {
-            // Be resilient...
-            aResult = ForwardingResult.failure ("forward_exception",
-                                                "Internal error forwarding the document: " +
-                                                                     ex.getMessage () +
-                                                                     " (" +
-                                                                     ex.getClass ().getName () +
-                                                                     ")");
-
-            for (final var aHandler : APCoreMetaManager.getAllNotificationHandlers ())
+            final IDocumentForwarder aForwarder = APCoreMetaManager.getForwarder ();
+            if (aForwarder == null)
             {
-              aHandler.onUnexpectedException ("InboundOrchestrator.forwardDocument",
-                                              "Internal error forwarding document for transaction '" +
-                                                                                     aInboundTx.getID () +
-                                                                                     "'",
-                                              ex);
-            }
-          }
+              final String sReason = "No document forwarder configured";
+              LOGGER.error (sLogPrefix + "Internal error - " + sReason);
+              // The attempt count is left unchanged, because no forwarding was attempted
+              aTxMgr.updateStatusAndRetry (aInboundTx.getID (),
+                                           EInboundStatus.PERMANENTLY_FAILED,
+                                           aInboundTx.getAttemptCount (),
+                                           null,
+                                           sReason);
+              // C2 must get an answer, even though this is a local configuration error
+              _handlePermanentForwardingFailure (aInboundTx, sReason);
 
-          if (aResult.isSuccess ())
-          {
-            // Forwarding worked
-            CircuitBreakerManager.recordSuccess (sCircuitBreakerID);
-            aAttemptMgr.createSuccess (aInboundTx.getID ());
-
-            aTxMgr.updateStatusCompleted (aInboundTx.getID (), EInboundStatus.FORWARDED);
-            LOGGER.info (sLogPrefix + "Forwarding successful for transaction '" + aInboundTx.getID () + "'");
-
-            final OffsetDateTime aReceivedDT = aInboundTx.getAS4Timestamp ();
-            final Duration aForwardingDuration = aReceivedDT != null ? Duration.between (aReceivedDT,
-                                                                                         aTimestampMgr.getCurrentDateTimeUTC ())
-                                                                     : null;
-            final boolean bIsRetry = aInboundTx.getAttemptCount () > 0;
-            for (final var aHandler : APCoreMetaManager.getAllLifecycleHandlers ())
-            {
-              aHandler.onInboundDocumentForwarded (aInboundTx.getID (),
-                                                   aInboundTx.getSbdhInstanceID (),
-                                                   aForwardingDuration,
-                                                   bIsRetry);
+              CircuitBreakerManager.recordFailure (sCircuitBreakerID);
+              bResultRecorded = true;
+              return ESuccess.FAILURE;
             }
 
-            bForwardSuccess = true;
+            // Set status
+            aTxMgr.updateStatus (aInboundTx.getID (), EInboundStatus.FORWARDING);
 
-            // Determine C4 country code: either from sync response or via configured resolution
-            // modes
-            String sC4CountryCode = aResult.getCountryCodeC4 ();
-            if (sC4CountryCode == null)
+            // Actual forwarding
+            ForwardingResult aResult;
+            Throwable aForwardingCause = null;
+            try
             {
-              sC4CountryCode = Telemetry.withSpan (CPhossAPOtel.SPAN_INBOUND_C4_RESOLVE,
-                                                   ETelemetrySpanKind.INTERNAL,
-                                                   aResolveSpan -> {
-                                                     aResolveSpan.setAttribute (CPhossAPOtel.ATTR_TRANSACTION_ID,
-                                                                                aInboundTx.getID ())
-                                                                 .setAttribute (CPhossAPOtel.ATTR_RECEIVER_ID,
-                                                                                aInboundTx.getReceiverID ());
-                                                     return C4CountryCodeResolver.resolve (aInboundTx);
-                                                   });
+              aResult = aForwarder.forwardDocument (ForwardableDocument.fromInbound (aInboundTx));
             }
-
-            if (sC4CountryCode != null)
+            catch (final Exception ex)
             {
-              // We can store the reporting item immediately
-              aTxMgr.updateC4CountryCode (aInboundTx.getID (), sC4CountryCode);
-              if (APPeppolReportingHelper.createInboundPeppolReportingItem (aInboundTx.getID ()).isFailure ())
+              aForwardingCause = ex;
+              // Be resilient...
+              aResult = ForwardingResult.failure ("forward_exception",
+                                                  "Internal error forwarding the document: " +
+                                                                       ex.getMessage () +
+                                                                       " (" +
+                                                                       ex.getClass ().getName () +
+                                                                       ")");
+
+              for (final var aHandler : APCoreMetaManager.getAllNotificationHandlers ())
               {
-                LOGGER.error (sLogPrefix +
-                              "Forwarding successful, but failed to store Peppol Reporting entry for '" +
-                              aInboundTx.getID () +
-                              "'");
+                aHandler.onUnexpectedException ("InboundOrchestrator.forwardDocument",
+                                                "Internal error forwarding document for transaction '" +
+                                                                                       aInboundTx.getID () +
+                                                                                       "'",
+                                                ex);
               }
             }
 
-            // Fire-and-forget dispatch to all configured secondary forwarders. Failures are logged
-            // only - no retry, no SLA, no effect on the inbound transaction status.
-            final ICommonsList <IDocumentForwarder> aSecondaryForwarders = APCoreMetaManager.getAllSecondaryForwarders ();
-            if (aSecondaryForwarders.isNotEmpty ())
+            if (aResult.isSuccess ())
             {
-              PhotonWorkerPool.getInstance ().run ("forward-secondary", () -> {
-                int nIndex = 0;
-                for (final IDocumentForwarder aSecondary : aSecondaryForwarders)
+              // Forwarding worked
+              CircuitBreakerManager.recordSuccess (sCircuitBreakerID);
+              bResultRecorded = true;
+              aAttemptMgr.createSuccess (aInboundTx.getID ());
+
+              aTxMgr.updateStatusCompleted (aInboundTx.getID (), EInboundStatus.FORWARDED);
+              LOGGER.info (sLogPrefix + "Forwarding successful for transaction '" + aInboundTx.getID () + "'");
+
+              final OffsetDateTime aReceivedDT = aInboundTx.getAS4Timestamp ();
+              final Duration aForwardingDuration = aReceivedDT != null ? Duration.between (aReceivedDT,
+                                                                                           aTimestampMgr.getCurrentDateTimeUTC ())
+                                                                       : null;
+              final boolean bIsRetry = aInboundTx.getAttemptCount () > 0;
+              for (final var aHandler : APCoreMetaManager.getAllLifecycleHandlers ())
+              {
+                aHandler.onInboundDocumentForwarded (aInboundTx.getID (),
+                                                     aInboundTx.getSbdhInstanceID (),
+                                                     aForwardingDuration,
+                                                     bIsRetry,
+                                                     aInboundTx.getVerificationResult ());
+              }
+
+              bForwardSuccess = true;
+
+              // Determine C4 country code: either from sync response or via configured resolution
+              // modes
+              String sC4CountryCode = aResult.getCountryCodeC4 ();
+              if (sC4CountryCode == null)
+              {
+                sC4CountryCode = Telemetry.withSpan (CPhossAPOtel.SPAN_INBOUND_C4_RESOLVE,
+                                                     ETelemetrySpanKind.INTERNAL,
+                                                     aResolveSpan -> {
+                                                       aResolveSpan.setAttribute (CPhossAPOtel.ATTR_TRANSACTION_ID,
+                                                                                  aInboundTx.getID ())
+                                                                   .setAttribute (CPhossAPOtel.ATTR_RECEIVER_ID,
+                                                                                  aInboundTx.getReceiverID ());
+                                                       return C4CountryCodeResolver.resolve (aInboundTx);
+                                                     });
+              }
+
+              if (sC4CountryCode != null)
+              {
+                // We can store the reporting item immediately
+                aTxMgr.updateC4CountryCode (aInboundTx.getID (), sC4CountryCode);
+                if (APPeppolReportingHelper.createInboundPeppolReportingItem (aInboundTx.getID ()).isFailure ())
                 {
-                  nIndex++;
-                  try (final ITelemetrySpan aSecSpan = Telemetry.startSpan (CPhossAPOtel.SPAN_INBOUND_FORWARD_SECONDARY,
-                                                                            ETelemetrySpanKind.PRODUCER)
-                                                                .setAttribute (CPhossAPOtel.ATTR_TRANSACTION_ID,
-                                                                               aInboundTx.getID ())
-                                                                .setAttribute (CPhossAPOtel.ATTR_SBDH_INSTANCE_ID,
-                                                                               aInboundTx.getSbdhInstanceID ())
-                                                                .setAttribute (CPhossAPOtel.ATTR_FORWARDER_INDEX,
-                                                                               nIndex))
-                  {
-                    try
-                    {
-                      final ForwardingResult aSecResult = aSecondary.forwardDocument (aInboundTx);
-                      if (aSecResult.isSuccess ())
-                      {
-                        LOGGER.info (sLogPrefix +
-                                     "Secondary forwarding #" +
-                                     nIndex +
-                                     " successful for transaction '" +
-                                     aInboundTx.getID () +
-                                     "'");
-                        aSecSpan.setStatusOk ();
-                      }
-                      else
-                      {
-                        LOGGER.warn (sLogPrefix +
-                                     "Secondary forwarding #" +
-                                     nIndex +
-                                     " failed (ignored) for transaction '" +
-                                     aInboundTx.getID () +
-                                     "': " +
-                                     aSecResult.getErrorDetails ());
-                        aSecSpan.setStatusError (aSecResult.getErrorDetails ());
-                      }
-                    }
-                    catch (final Exception ex)
-                    {
-                      // Catch everything so a failing secondary does not prevent the others from
-                      // running.
-                      LOGGER.error (sLogPrefix +
-                                    "Secondary forwarding #" +
-                                    nIndex +
-                                    " threw exception (ignored) for transaction '" +
-                                    aInboundTx.getID () +
-                                    "'",
-                                    ex);
-                      aSecSpan.recordException (ex).setStatusError (ex.getMessage ());
-                    }
-                  }
+                  LOGGER.error (sLogPrefix +
+                                "Forwarding successful, but failed to store Peppol Reporting entry for '" +
+                                aInboundTx.getID () +
+                                "'");
                 }
-              });
+              }
+              else
+                if (APPeppolReportingHelper.isExcludedFromReporting (aInboundTx.getSenderID (),
+                                                                     aInboundTx.getReceiverID ()))
+                {
+                  // A transaction that is not counted anyway needs no C4 country code - close the
+                  // reporting status, so that it is neither queried via the API nor blocks the
+                  // archival
+                  APPeppolReportingHelper.createInboundPeppolReportingItem (aInboundTx.getID ());
+                }
+
+              // Fire-and-forget dispatch to all configured secondary forwarders. Failures are
+              // logged
+              // only - no retry, no SLA, no effect on the inbound transaction status.
+              _dispatchFireAndForget (sLogPrefix,
+                                      aInboundTx,
+                                      APCoreMetaManager.getAllSecondaryForwarders (),
+                                      "forward-secondary",
+                                      CPhossAPOtel.SPAN_INBOUND_FORWARD_SECONDARY,
+                                      "Secondary forwarding");
+
+              return ESuccess.SUCCESS;
             }
 
-            return ESuccess.SUCCESS;
-          }
+            // Forwarding failed
+            CircuitBreakerManager.recordFailure (sCircuitBreakerID, aForwardingCause);
+            bResultRecorded = true;
+            aAttemptMgr.createFailure (aInboundTx.getID (), aResult.getErrorCode (), aResult.getErrorDetails ());
 
-          // Forwarding failed
-          CircuitBreakerManager.recordFailure (sCircuitBreakerID);
-          aAttemptMgr.createFailure (aInboundTx.getID (), aResult.getErrorCode (), aResult.getErrorDetails ());
-
-          final int nNewAttemptCount = aInboundTx.getAttemptCount () + 1;
-          final int nMaxRetryAttempts = APCoreConfig.getRetryForwardingMaxAttempts ();
-          if (!aResult.isRetryAllowed () || nNewAttemptCount >= nMaxRetryAttempts)
-          {
-            // Maximum number of retries are exhausted - we go on "permanently
-            // failed"
-            final String sFailureReason = aResult.isRetryAllowed () ? "Max retries (" +
-                                                                      nMaxRetryAttempts +
-                                                                      ") exhausted: " +
-                                                                      aResult.getErrorDetails ()
-                                                                    : "Retry disallowed by receiver: " +
-                                                                      aResult.getErrorDetails ();
-            aTxMgr.updateStatusAndRetry (aInboundTx.getID (),
-                                         EInboundStatus.PERMANENTLY_FAILED,
-                                         nNewAttemptCount,
-                                         null,
-                                         sFailureReason);
-
-            // Don't send MLS as response to MLS
-            if (!CPhossAP.isMLR (aInboundTx.getDocTypeID (), aInboundTx.getProcessID ()) &&
-                !CPhossAP.isMLS (aInboundTx.getDocTypeID (), aInboundTx.getProcessID ()))
+            final int nNewAttemptCount = aInboundTx.getAttemptCount () + 1;
+            final int nMaxRetryAttempts = APCoreConfig.getRetryForwardingMaxAttempts ();
+            if (!aResult.isRetryAllowed () || nNewAttemptCount >= nMaxRetryAttempts)
             {
-              // Send asynchronously
-              PhotonWorkerPool.getInstance ().run ("send-mls", () -> {
-                // Send negative MLS (RE) with AB reason back to C2
-                // The PNP states, that "FD" can only be used in case of "permanent failure". We
-                // still expect that this error is a "temporary failure", so we are supposed to send
-                // "acknowledging" as we assume it will be resolved later
-                final MlsOutcome aOutcome = true ? MlsOutcome.acknowledging ("Forwarding to C4 failed for now")
-                                                 : MlsOutcome.rejection ("Forwarding to C4 failed",
-                                                                         MlsOutcomeIssue.failureOfDelivery ("Permanent inability to forward document to C4"));
-                MlsHandler.triggerSendingInboundResultMls (aInboundTx, aOutcome);
-              });
-            }
+              // Maximum number of retries are exhausted - we go on "permanently
+              // failed"
+              final String sFailureReason = aResult.isRetryAllowed () ? "Max retries (" +
+                                                                        nMaxRetryAttempts +
+                                                                        ") exhausted: " +
+                                                                        aResult.getErrorDetails ()
+                                                                      : "Retry disallowed by receiver: " +
+                                                                        aResult.getErrorDetails ();
+              aTxMgr.updateStatusAndRetry (aInboundTx.getID (),
+                                           EInboundStatus.PERMANENTLY_FAILED,
+                                           nNewAttemptCount,
+                                           null,
+                                           sFailureReason);
 
-            for (final var aHandler : APCoreMetaManager.getAllNotificationHandlers ())
+              _handlePermanentForwardingFailure (aInboundTx,
+                                                 aResult.isRetryAllowed () ? "Max retries exhausted"
+                                                                           : "Retry disallowed by receiver");
+            }
+            else
             {
-              aHandler.onInboundPermanentForwardingFailure (aInboundTx.getID (),
-                                                            aInboundTx.getSbdhInstanceID (),
-                                                            aResult.isRetryAllowed () ? "Max retries exhausted"
-                                                                                      : "Retry disallowed by receiver");
+              // Calculate the next retry and remember it
+              final var aNextRetry = BackoffCalculator.calculateNextRetry (nNewAttemptCount,
+                                                                           APCoreConfig.getRetryForwardingInitialBackoff (),
+                                                                           APCoreConfig.getRetryForwardingBackoffMultiplier (),
+                                                                           APCoreConfig.getRetryForwardingMaxBackoff ());
+              aTxMgr.updateStatusAndRetry (aInboundTx.getID (),
+                                           EInboundStatus.FORWARD_FAILED,
+                                           nNewAttemptCount,
+                                           aNextRetry,
+                                           aResult.getErrorDetails ());
             }
           }
-          else
+          finally
           {
-            // Calculate the next retry and remember it
-            final var aNextRetry = BackoffCalculator.calculateNextRetry (nNewAttemptCount,
-                                                                         APCoreConfig.getRetryForwardingInitialBackoff (),
-                                                                         APCoreConfig.getRetryForwardingBackoffMultiplier (),
-                                                                         APCoreConfig.getRetryForwardingMaxBackoff ());
-            aTxMgr.updateStatusAndRetry (aInboundTx.getID (),
-                                         EInboundStatus.FORWARD_FAILED,
-                                         nNewAttemptCount,
-                                         aNextRetry,
-                                         aResult.getErrorDetails ());
+            // Unexpected RuntimeException - the permit must not be leaked
+            if (!bResultRecorded)
+              CircuitBreakerManager.recordFailure (sCircuitBreakerID);
           }
+        }
+        else
+        {
+          // The circuit breaker is open, so no forwarding was attempted at all. The transaction
+          // must nevertheless be scheduled for a retry - otherwise it would stay in its current
+          // status forever, because only "forward_failed" is picked up by the retry scheduler.
+          // No forwarding attempt row is created and the attempt count is left unchanged, because
+          // nothing was tried
+          final OffsetDateTime aNextRetry = aTimestampMgr.getCurrentDateTimeUTC ()
+                                                         .plus (APCoreConfig.getRetryForwardingInitialBackoff ());
+          final String sRejectionMsg = CircuitBreakerManager.getRejectionMessage (sCircuitBreakerID,
+                                                                                  "Document forwarding");
+          LOGGER.warn (sLogPrefix +
+                       sRejectionMsg +
+                       " - not forwarding transaction '" +
+                       aInboundTx.getID () +
+                       "' now, retrying at " +
+                       aNextRetry);
+          aTxMgr.updateStatusAndRetry (aInboundTx.getID (),
+                                       EInboundStatus.FORWARD_FAILED,
+                                       aInboundTx.getAttemptCount (),
+                                       aNextRetry,
+                                       sRejectionMsg);
         }
       }
       catch (final RuntimeException ex)
@@ -796,5 +1558,161 @@ public final class InboundOrchestrator
     }
 
     return bForwardSuccess ? ESuccess.SUCCESS : ESuccess.FAILURE;
+  }
+
+  /**
+   * Read the stored SBD of an inbound MLS transaction and correlate it with the referenced outbound
+   * transaction. This is needed, if the MLS could not be correlated when it was received, because
+   * its verification was deferred.
+   *
+   * @param sLogPrefix
+   *        Log message prefix. May not be <code>null</code>.
+   * @param aInboundTx
+   *        The inbound transaction of the MLS. May not be <code>null</code>.
+   * @return {@link ESuccess#FAILURE} if the MLS could not be interpreted and the processing of the
+   *         document must be stopped, {@link ESuccess#SUCCESS} otherwise.
+   */
+  @NonNull
+  private static ESuccess _correlateStoredMls (@NonNull final String sLogPrefix,
+                                               @NonNull final IInboundTransaction aInboundTx)
+  {
+    final IInboundTransactionManager aTxMgr = APJdbcMetaManager.getInboundTransactionMgr ();
+    final IDocumentPayloadManager aDocPayloadMgr = APBasicMetaManager.getDocPayloadMgr ();
+    final IIdentifierFactory aIF = APBasicMetaManager.getIdentifierFactory ();
+
+    final PeppolSBDHData aSbdData;
+    try (final InputStream aIS = aDocPayloadMgr.openDocumentStreamForRead (aInboundTx.getDocumentPath ()))
+    {
+      aSbdData = new PeppolSBDHDataReader (aIF).extractData (aIS);
+    }
+    catch (final Exception ex)
+    {
+      LOGGER.error (sLogPrefix +
+                    "Failed to re-read the stored SBD of inbound MLS '" +
+                    aInboundTx.getSbdhInstanceID () +
+                    "' from '" +
+                    aInboundTx.getDocumentPath () +
+                    "'",
+                    ex);
+      aTxMgr.updateStatusAndNextRetry (aInboundTx.getID (),
+                                       EInboundStatus.PERMANENTLY_FAILED,
+                                       null,
+                                       "Failed to re-read the stored SBD: " + ex.getMessage ());
+      return ESuccess.FAILURE;
+    }
+
+    // The processing errors are of no use here - the AS4 response was sent long ago
+    final ICommonsList <String> aProcessingErrors = new CommonsArrayList <> ();
+    final ESuccess eMLS = _handleIncomingMls (sLogPrefix,
+                                              aInboundTx,
+                                              aSbdData.getBusinessMessageNoClone (),
+                                              aProcessingErrors);
+    if (eMLS.isFailure ())
+    {
+      LOGGER.error (sLogPrefix +
+                    "Failed to correlate the deferred inbound MLS '" +
+                    aInboundTx.getSbdhInstanceID () +
+                    "': " +
+                    aProcessingErrors);
+      if (aInboundTx.getStatus () != EInboundStatus.PERMANENTLY_FAILED)
+        aTxMgr.updateStatusAndNextRetry (aInboundTx.getID (),
+                                         EInboundStatus.PERMANENTLY_FAILED,
+                                         null,
+                                         "Failed to interpret the received MLS");
+      return ESuccess.FAILURE;
+    }
+    return ESuccess.SUCCESS;
+  }
+
+  /**
+   * Resume the processing of an inbound document whose verification was deferred, because a
+   * verifier backend service was unavailable. The verification is repeated and - if it succeeds -
+   * the processing continues exactly where
+   * {@link #processIncomingDocument(String, String, String, java.security.cert.X509Certificate, OffsetDateTime, PeppolSBDHData, byte[])}
+   * left it: an incoming MLS is correlated, the document is forwarded to C4 and the positive MLS is
+   * sent to C2.
+   * <p>
+   * If the verifier is still unavailable, the verification is deferred again, until the configured
+   * maximum deferral duration is exceeded. The forwarding attempt count is never modified by the
+   * deferral.
+   * </p>
+   *
+   * @param sLogPrefix
+   *        Log message prefix for traceability. May not be <code>null</code>.
+   * @param aInboundTx
+   *        The inbound transaction to be resumed. May not be <code>null</code>.
+   * @return {@link ESuccess#SUCCESS} only if the document was verified and forwarded to C4.
+   * @since 0.12.0
+   */
+  @NonNull
+  public static ESuccess resumeDeferredInboundDocument (@NonNull final String sLogPrefix,
+                                                        @NonNull final IInboundTransaction aInboundTx)
+  {
+    ValueEnforcer.notNull (sLogPrefix, "LogPrefix");
+    ValueEnforcer.notNull (aInboundTx, "InboundTx");
+
+    final IInboundTransactionManager aTxMgr = APJdbcMetaManager.getInboundTransactionMgr ();
+    final String sTxID = aInboundTx.getID ();
+    final Wrapper <ICommonsList <MlsOutcomeIssue>> aMlsWarnings = new Wrapper <> ();
+    IInboundTransaction aVerifiedTx = aInboundTx;
+
+    if (APCoreConfig.isVerificationInboundEnabled ())
+    {
+      // The stored identifiers are URI encoded, so they must be parsed and not created
+      final IIdentifierFactory aIF = APBasicMetaManager.getIdentifierFactory ();
+
+      final IDocumentTypeIdentifier aDocTypeID = aIF.parseDocumentTypeIdentifier (aInboundTx.getDocTypeID ());
+      final IProcessIdentifier aProcessID = aIF.parseProcessIdentifier (aInboundTx.getProcessID ());
+      if (aDocTypeID == null || aProcessID == null)
+      {
+        LOGGER.error (sLogPrefix +
+                      "Inbound transaction '" +
+                      sTxID +
+                      "' contains the invalid document type ID '" +
+                      aInboundTx.getDocTypeID () +
+                      "' or the invalid process ID '" +
+                      aInboundTx.getProcessID () +
+                      "' - cannot re-verify it");
+        aTxMgr.updateStatusAndNextRetry (sTxID,
+                                         EInboundStatus.PERMANENTLY_FAILED,
+                                         null,
+                                         "Invalid document type ID or process ID - re-verification impossible");
+        return ESuccess.FAILURE;
+      }
+
+      if (_verifyInboundDocument (sLogPrefix, aInboundTx, aDocTypeID, aProcessID, aMlsWarnings).isBreak ())
+        return ESuccess.FAILURE;
+
+      // The verification wrote its verdict to the database, but the provided instance was loaded
+      // before it ran - so re-read it, exactly as the initial receive path does
+      aVerifiedTx = aTxMgr.getByID (sTxID);
+      if (aVerifiedTx == null)
+      {
+        LOGGER.error (sLogPrefix +
+                      "Failed to re-read the inbound transaction '" +
+                      sTxID +
+                      "' after its re-verification");
+        return ESuccess.FAILURE;
+      }
+    }
+    else
+    {
+      // Verification was switched off in the meantime - continue as if it succeeded
+      LOGGER.info (sLogPrefix +
+                   "Inbound verification is disabled - continuing with the deferred document '" +
+                   aInboundTx.getSbdhInstanceID () +
+                   "'");
+    }
+
+    // Now do what was skipped when the document was received
+    if (CPhossAP.isMLS (aVerifiedTx.getDocTypeID (), aVerifiedTx.getProcessID ()))
+      if (_correlateStoredMls (sLogPrefix, aVerifiedTx).isFailure ())
+        return ESuccess.FAILURE;
+
+    // Forward - Business Document and MLS
+    final ESuccess eForward = forwardDocument (sLogPrefix, aVerifiedTx);
+    if (eForward.isSuccess ())
+      _sendPositiveMlsAfterForwarding (aVerifiedTx, aMlsWarnings.get ());
+    return eForward;
   }
 }

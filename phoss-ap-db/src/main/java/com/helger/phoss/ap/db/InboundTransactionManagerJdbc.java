@@ -40,6 +40,7 @@ import com.helger.peppolid.peppol.process.EPredefinedProcessIdentifier;
 import com.helger.phoss.ap.api.IInboundTransactionManager;
 import com.helger.phoss.ap.api.codelist.EInboundStatus;
 import com.helger.phoss.ap.api.codelist.EReportingStatus;
+import com.helger.phoss.ap.api.codelist.EVerificationResult;
 import com.helger.phoss.ap.api.datetime.IAPTimestampManager;
 import com.helger.phoss.ap.api.model.IInboundTransaction;
 import com.helger.phoss.ap.db.dto.InboundTransactionRow;
@@ -51,6 +52,8 @@ import com.helger.phoss.ap.db.dto.InboundTransactionRow;
  */
 public class InboundTransactionManagerJdbc extends AbstractAPJdbcManager implements IInboundTransactionManager
 {
+  // All columns, in the order expected by the InboundTransactionRow constructor. This is also used
+  // as the INSERT column list.
   private static final String COLS = "id, incoming_id, c2_seat_id, c3_seat_id, signing_cert_cn," +
                                      " sender_id, receiver_id, doc_type_id, process_id," +
                                      " document_path, document_size, document_hash," +
@@ -58,7 +61,8 @@ public class InboundTransactionManagerJdbc extends AbstractAPJdbcManager impleme
                                      " c1_country_code, c4_country_code, is_duplicate_as4, is_duplicate_sbdh," +
                                      " status, attempt_count, received_dt, completed_dt," +
                                      " reporting_status, next_retry_dt, error_details," +
-                                     " mls_to, mls_type, mls_response_code, mls_outbound_transaction_id";
+                                     " mls_to, mls_type, mls_response_code, mls_outbound_transaction_id," +
+                                     " verification_result, verification_details";
   private static final Logger LOGGER = LoggerFactory.getLogger (InboundTransactionManagerJdbc.class);
 
   private final String m_sTableName;
@@ -109,7 +113,7 @@ public class InboundTransactionManagerJdbc extends AbstractAPJdbcManager impleme
                                                                  " (" +
                                                                  COLS +
                                                                  ")" +
-                                                                 " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                                                                 " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                                                                  new ConstantPreparedStatementDataProvider (sID,
                                                                                                             sIncomingID,
                                                                                                             sC2SeatID,
@@ -138,6 +142,8 @@ public class InboundTransactionManagerJdbc extends AbstractAPJdbcManager impleme
                                                                                                             null,
                                                                                                             sMlsTo,
                                                                                                             eMlsType.getID (),
+                                                                                                            null,
+                                                                                                            null,
                                                                                                             null,
                                                                                                             null));
 
@@ -305,11 +311,32 @@ public class InboundTransactionManagerJdbc extends AbstractAPJdbcManager impleme
 
   /** {@inheritDoc} */
   @NonNull
-  public ESuccess updateStatusCompleted (@NonNull final String sID, @NonNull final EInboundStatus eStatus)
+  public ESuccess updateStatusAndNextRetry (@NonNull final String sID,
+                                            @NonNull final EInboundStatus eStatus,
+                                            @Nullable final OffsetDateTime aNextRetryDT,
+                                            @Nullable final String sErrorDetails)
   {
     final long nRowsAffected = newExecutor ().insertOrUpdateOrDelete ("UPDATE " +
                                                                       m_sTableName +
-                                                                      " SET status=?, completed_dt=?" +
+                                                                      " SET status=?, next_retry_dt=?, error_details=?" +
+                                                                      " WHERE id=?",
+                                                                      new ConstantPreparedStatementDataProvider (eStatus.getID (),
+                                                                                                                 DBValueHelper.toTimestamp (aNextRetryDT),
+                                                                                                                 sErrorDetails,
+                                                                                                                 sID));
+    return ESuccess.valueOf (nRowsAffected == 1);
+  }
+
+  /** {@inheritDoc} */
+  @NonNull
+  public ESuccess updateStatusCompleted (@NonNull final String sID, @NonNull final EInboundStatus eStatus)
+  {
+    // The next retry and the error details of the previous failure or deferral are cleared, so that
+    // a completed transaction does not look like it still has something pending
+    final long nRowsAffected = newExecutor ().insertOrUpdateOrDelete ("UPDATE " +
+                                                                      m_sTableName +
+                                                                      " SET status=?, completed_dt=?," +
+                                                                      " next_retry_dt=NULL, error_details=NULL" +
                                                                       " WHERE id=?",
                                                                       new ConstantPreparedStatementDataProvider (eStatus.getID (),
                                                                                                                  DBValueHelper.toTimestamp (now ()),
@@ -349,6 +376,57 @@ public class InboundTransactionManagerJdbc extends AbstractAPJdbcManager impleme
 
   /** {@inheritDoc} */
   @NonNull
+  public ESuccess claimMlsResponseCode (@NonNull final String sID,
+                                        @NonNull final EPeppolMLSResponseCode eMlsResponseCode)
+  {
+    ValueEnforcer.notNull (sID, "ID");
+    ValueEnforcer.notNull (eMlsResponseCode, "MlsResponseCode");
+
+    // The "IS NULL" condition is the whole point: the first writer wins and every later one gets 0
+    // affected rows, so that no second MLS can be created for the same business document
+    final long nRowsAffected = newExecutor ().insertOrUpdateOrDelete ("UPDATE " +
+                                                                      m_sTableName +
+                                                                      " SET mls_response_code=?" +
+                                                                      " WHERE id=? AND mls_response_code IS NULL",
+                                                                      new ConstantPreparedStatementDataProvider (eMlsResponseCode.getID (),
+                                                                                                                 sID));
+    return ESuccess.valueOf (nRowsAffected == 1);
+  }
+
+  /** {@inheritDoc} */
+  @NonNull
+  public ESuccess releaseMlsResponseCodeClaim (@NonNull final String sID)
+  {
+    ValueEnforcer.notNull (sID, "ID");
+
+    // The "IS NULL" condition on the outbound transaction ID makes this safe: the response code of
+    // an MLS that made it to an outbound transaction can never be erased by a release
+    final long nRowsAffected = newExecutor ().insertOrUpdateOrDelete ("UPDATE " +
+                                                                      m_sTableName +
+                                                                      " SET mls_response_code=NULL" +
+                                                                      " WHERE id=? AND mls_outbound_transaction_id IS NULL",
+                                                                      new ConstantPreparedStatementDataProvider (sID));
+    return ESuccess.valueOf (nRowsAffected == 1);
+  }
+
+  /** {@inheritDoc} */
+  @NonNull
+  public ESuccess updateVerificationResult (@NonNull final String sID,
+                                            @NonNull final EVerificationResult eVerificationResult,
+                                            @Nullable final String sVerificationDetails)
+  {
+    final long nRowsAffected = newExecutor ().insertOrUpdateOrDelete ("UPDATE " +
+                                                                      m_sTableName +
+                                                                      " SET verification_result=?, verification_details=?" +
+                                                                      " WHERE id=?",
+                                                                      new ConstantPreparedStatementDataProvider (eVerificationResult.getID (),
+                                                                                                                 sVerificationDetails,
+                                                                                                                 sID));
+    return ESuccess.valueOf (nRowsAffected == 1);
+  }
+
+  /** {@inheritDoc} */
+  @NonNull
   public ESuccess updateReportingStatus (@NonNull final String sID, @NonNull final EReportingStatus eReportingStatus)
   {
     final long nRowsAffected = newExecutor ().insertOrUpdateOrDelete ("UPDATE " +
@@ -368,8 +446,9 @@ public class InboundTransactionManagerJdbc extends AbstractAPJdbcManager impleme
                                                                       COLS +
                                                                       " FROM " +
                                                                       m_sTableName +
-                                                                      " WHERE status IN (?,?,?)",
+                                                                      " WHERE status IN (?,?,?,?)",
                                                                       new ConstantPreparedStatementDataProvider (EInboundStatus.RECEIVED.getID (),
+                                                                                                                 EInboundStatus.VERIFICATION_DEFERRED.getID (),
                                                                                                                  EInboundStatus.FORWARDING.getID (),
                                                                                                                  EInboundStatus.FORWARD_FAILED.getID ()));
     final ICommonsList <IInboundTransaction> ret = new CommonsArrayList <> ();
@@ -402,6 +481,72 @@ public class InboundTransactionManagerJdbc extends AbstractAPJdbcManager impleme
 
   /** {@inheritDoc} */
   @NonNull
+  public ICommonsList <IInboundTransaction> getAllForVerificationRetry (@Nonnegative final int nBatchSize)
+  {
+    final ICommonsList <DBResultRow> aRows = newExecutor ().queryAll ("SELECT " +
+                                                                      COLS +
+                                                                      " FROM " +
+                                                                      m_sTableName +
+                                                                      " WHERE status=? AND next_retry_dt <= NOW()" +
+                                                                      " ORDER BY next_retry_dt" +
+                                                                      " LIMIT " +
+                                                                      nBatchSize +
+                                                                      " FOR UPDATE SKIP LOCKED",
+                                                                      new ConstantPreparedStatementDataProvider (EInboundStatus.VERIFICATION_DEFERRED.getID ()));
+    final ICommonsList <IInboundTransaction> ret = new CommonsArrayList <> ();
+    if (aRows != null)
+      for (final DBResultRow aRow : aRows)
+        ret.add (new InboundTransactionRow (aRow));
+    return ret;
+  }
+
+  /** {@inheritDoc} */
+  @NonNull
+  public ICommonsList <IInboundTransaction> getAllForMlsApiTimeout (@Nonnegative final int nBatchSize,
+                                                                    @NonNull final OffsetDateTime aMaxAS4Timestamp)
+  {
+    ValueEnforcer.isGT0 (nBatchSize, "BatchSize");
+    ValueEnforcer.notNull (aMaxAS4Timestamp, "MaxAS4Timestamp");
+
+    // Forwarded business documents (neither MLS nor MLR) that were received long enough ago and
+    // for which no MLS response code was determined yet. The age is deliberately measured on the
+    // AS4 timestamp and not on "completed_dt", because MLS-1 is measured from the reception of the
+    // document - anchoring on the forwarding would add the forwarding duration on top of the SLA
+    // budget instead of consuming it from it. A document that was rejected by the verification is
+    // excluded, because C2 already received the negative MLS (RE) of that rejection, and so is one
+    // with the MLS type FAILURE_ONLY, which never gets a positive MLS at all - recording a fallback
+    // response code for it would only block the rejection the Receiver Backend may still report
+    final ICommonsList <DBResultRow> aRows = newExecutor ().queryAll ("SELECT " +
+                                                                      COLS +
+                                                                      " FROM " +
+                                                                      m_sTableName +
+                                                                      " WHERE status=? AND mls_response_code IS NULL" +
+                                                                      " AND as4_timestamp < ?" +
+                                                                      " AND mls_type <> ?" +
+                                                                      " AND NOT (doc_type_id=? AND process_id=?)" +
+                                                                      " AND NOT (doc_type_id=? AND process_id=?)" +
+                                                                      " AND (verification_result IS NULL OR verification_result <> ?)" +
+                                                                      " ORDER BY as4_timestamp" +
+                                                                      " LIMIT " +
+                                                                      nBatchSize +
+                                                                      " FOR UPDATE SKIP LOCKED",
+                                                                      new ConstantPreparedStatementDataProvider (EInboundStatus.FORWARDED.getID (),
+                                                                                                                 DBValueHelper.toTimestamp (aMaxAS4Timestamp),
+                                                                                                                 EPeppolMLSType.FAILURE_ONLY.getID (),
+                                                                                                                 EPredefinedDocumentTypeIdentifier.PEPPOL_MLS_1_0.getURIEncoded (),
+                                                                                                                 EPredefinedProcessIdentifier.urn_peppol_edec_mls.getURIEncoded (),
+                                                                                                                 EPredefinedDocumentTypeIdentifier.APPLICATIONRESPONSE_FDC_PEPPOL_EU_POACC_TRNS_MLR_3.getURIEncoded (),
+                                                                                                                 EPredefinedProcessIdentifier.BIS3_MLR.getURIEncoded (),
+                                                                                                                 EVerificationResult.REJECTED.getID ()));
+    final ICommonsList <IInboundTransaction> ret = new CommonsArrayList <> ();
+    if (aRows != null)
+      for (final DBResultRow aRow : aRows)
+        ret.add (new InboundTransactionRow (aRow));
+    return ret;
+  }
+
+  /** {@inheritDoc} */
+  @NonNull
   public ICommonsList <IInboundTransaction> getAllForArchival (@Nonnegative final int nBatchSize)
   {
     ValueEnforcer.isGT0 (nBatchSize, "BatchSize");
@@ -410,7 +555,7 @@ public class InboundTransactionManagerJdbc extends AbstractAPJdbcManager impleme
                                                                       COLS +
                                                                       " FROM " +
                                                                       m_sTableName +
-                                                                      " WHERE status IN (?,?,?) AND reporting_status=?" +
+                                                                      " WHERE status IN (?,?,?) AND reporting_status IN (?,?)" +
                                                                       " ORDER BY completed_dt" +
                                                                       " LIMIT " +
                                                                       nBatchSize +
@@ -418,7 +563,8 @@ public class InboundTransactionManagerJdbc extends AbstractAPJdbcManager impleme
                                                                       new ConstantPreparedStatementDataProvider (EInboundStatus.REJECTED.getID (),
                                                                                                                  EInboundStatus.FORWARDED.getID (),
                                                                                                                  EInboundStatus.PERMANENTLY_FAILED.getID (),
-                                                                                                                 EReportingStatus.REPORTED.getID ()));
+                                                                                                                 EReportingStatus.REPORTED.getID (),
+                                                                                                                 EReportingStatus.EXCLUDED.getID ()));
     final ICommonsList <IInboundTransaction> ret = new CommonsArrayList <> ();
     if (aRows != null)
       for (final DBResultRow aRow : aRows)
@@ -469,6 +615,37 @@ public class InboundTransactionManagerJdbc extends AbstractAPJdbcManager impleme
       for (final DBResultRow aRow : aRows)
         ret.add (new InboundTransactionRow (aRow));
     return ret;
+  }
+
+  /** {@inheritDoc} */
+  @NonNull
+  public ICommonsList <IInboundTransaction> getAllTransactions (@Nonnegative final int nOffset,
+                                                                @Nonnegative final int nLimit)
+  {
+    ValueEnforcer.isGE0 (nOffset, "Offset");
+    ValueEnforcer.isGE0 (nLimit, "Limit");
+
+    final ICommonsList <DBResultRow> aRows = newExecutor ().queryAll ("SELECT " +
+                                                                      COLS +
+                                                                      " FROM " +
+                                                                      m_sTableName +
+                                                                      " ORDER BY received_dt DESC" +
+                                                                      " LIMIT " +
+                                                                      nLimit +
+                                                                      " OFFSET " +
+                                                                      nOffset);
+    final ICommonsList <IInboundTransaction> ret = new CommonsArrayList <> ();
+    if (aRows != null)
+      for (final DBResultRow aRow : aRows)
+        ret.add (new InboundTransactionRow (aRow));
+    return ret;
+  }
+
+  /** {@inheritDoc} */
+  @Nonnegative
+  public long getTransactionCount ()
+  {
+    return newExecutor ().queryCount ("SELECT COUNT(*) FROM " + m_sTableName);
   }
 
   @Override

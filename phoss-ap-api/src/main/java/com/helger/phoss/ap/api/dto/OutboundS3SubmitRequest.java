@@ -71,16 +71,16 @@ public class OutboundS3SubmitRequest
   @Schema (description = "Alternative Peppol Participant ID to receive MLS responses")
   private String mlsTo;
 
-  @Schema (description = "SBDH Standard override for non-XML payloads (e.g., urn:peppol:doctype:pdf+xml). Auto-derived from the document type when omitted.")
+  @Schema (description = "SBDH Standard override for non-XML payloads (e.g., urn:peppol:doctype:pdf+xml). Auto-derived from the document type when omitted, but mandatory for document types with a non-XML syntax specific ID.")
   private String sbdhStandard;
 
-  @Schema (description = "SBDH TypeVersion override (e.g., '0'). Auto-derived from the document type when omitted.")
+  @Schema (description = "SBDH TypeVersion override (e.g., '0'). Auto-derived from the document type when omitted, but mandatory for document types with a non-XML syntax specific ID.")
   private String sbdhTypeVersion;
 
-  @Schema (description = "SBDH Type override (e.g., 'factur-x'). Auto-derived from the document type when omitted.")
+  @Schema (description = "SBDH Type override (e.g., 'factur-x'). Auto-derived from the document type when omitted, but mandatory for document types with a non-XML syntax specific ID.")
   private String sbdhType;
 
-  @Schema (description = "MIME type for binary payloads (e.g., 'application/pdf'). When set the payload is wrapped in <BinaryContent>; otherwise treated as XML.",
+  @Schema (description = "MIME type for binary payloads (e.g., 'application/pdf'). When set the payload is wrapped in <BinaryContent>; otherwise treated as XML. Mandatory for document types with a non-XML syntax specific ID.",
            example = "application/pdf")
   private String payloadMimeType;
 

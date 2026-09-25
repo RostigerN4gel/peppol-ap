@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<!--
+
+    Copyright (C) 2026 Philip Helger (www.helger.com)
+    philip[at]helger[dot]com
+
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
+
+            http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>phoss AP</title>
+<style>
+body { font-family: system-ui, sans-serif; margin: 2rem auto; max-width: 40rem; padding: 0 1rem; line-height: 1.5; }
+h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
+p.sub { color: #666; margin-top: 0; }
+code { background: #f0f0f0; padding: 0.1rem 0.3rem; border-radius: 3px; }
+</style>
+</head>
+<body>
+<h1>phoss Peppol Access Point</h1>
+<p class="sub">A complete open-source Peppol Access Point based on phase4.</p>
+<p>This server has no user interface &ndash; it only offers HTTP APIs:</p>
+<ul>
+  <li><a href="management/status">/management/status</a> &ndash; status, version and configuration overview</li>
+  <li><a href="actuator/health">/actuator/health</a> &ndash; Spring Boot health check</li>
+  <li><a href="openapi/v3/api-docs">/openapi/v3/api-docs</a> (<a href="openapi/v3/api-docs.yaml">YAML</a>) &ndash; OpenAPI specification of all APIs</li>
+  <li><code>/as4</code> &ndash; the Peppol AS4 receiver endpoint (POST only)</li>
+</ul>
+<p>All <code>/api/**</code> endpoints require the <code>X-Token</code> HTTP header.</p>
+<p>See the <a href="https://github.com/phax/phoss-ap">project page</a> and the
+   <a href="https://github.com/phax/phoss-ap/wiki">wiki</a> for details.</p>
+</body>
+</html>

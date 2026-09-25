@@ -35,21 +35,31 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.w3c.dom.Document;
 
+import com.helger.annotation.style.VisibleForTesting;
 import com.helger.base.io.stream.StreamHelper;
 import com.helger.base.string.StringHelper;
 import com.helger.collection.commons.ICommonsList;
 import com.helger.ddd.DocumentDetails;
+import com.helger.json.IJsonObject;
+import com.helger.json.JsonArray;
+import com.helger.json.JsonObject;
 import com.helger.json.JsonValue;
 import com.helger.peppol.sbdh.PeppolSBDHData;
 import com.helger.peppolid.IDocumentTypeIdentifier;
 import com.helger.peppolid.IParticipantIdentifier;
 import com.helger.peppolid.IProcessIdentifier;
 import com.helger.peppolid.factory.IIdentifierFactory;
+import com.helger.peppolid.peppol.doctype.PeppolDocumentTypeIdentifierParts;
+import com.helger.peppolid.peppol.doctype.PeppolGenericDocumentTypeIdentifierParts;
 import com.helger.phase4.peppol.Phase4PeppolSendingReport;
 import com.helger.phoss.ap.api.IOutboundTransactionManager;
 import com.helger.phoss.ap.api.dto.OutboundS3SubmitRequest;
 import com.helger.phoss.ap.api.dto.OutboundTransactionResponse;
 import com.helger.phoss.ap.api.model.IOutboundTransaction;
+import com.helger.phoss.ap.api.model.OutboundSubmitResult;
+import com.helger.phoss.ap.api.model.VerificationIssue;
+import com.helger.phoss.ap.api.model.VerificationOutcome;
+import com.helger.phoss.ap.api.model.VerifierResult;
 import com.helger.phoss.ap.basic.APBasicMetaManager;
 import com.helger.phoss.ap.core.APCoreConfig;
 import com.helger.phoss.ap.core.ddd.DDDHelper;
@@ -104,6 +114,70 @@ public class OutboundController
    *         if all fields are valid.
    */
   @Nullable
+  /**
+   * Build the JSON error body for a failed outbound submission. Before 0.12.0 this was a bare JSON
+   * string with a generic message, which gave the submitter no way to learn <em>why</em> a document
+   * was rejected.
+   *
+   * @param aSubmitResult
+   *        The failed submit result. May not be <code>null</code>.
+   * @return The JSON body. Never <code>null</code>.
+   */
+  @NonNull
+  private static String _submitErrorJson (@NonNull final OutboundSubmitResult aSubmitResult)
+  {
+    final IJsonObject ret = new JsonObject ();
+    if (aSubmitResult.isVerificationRejected ())
+    {
+      final VerifierResult aVR = aSubmitResult.getVerifierResult ();
+      final VerificationOutcome aOutcome = aVR.outcome ();
+      ret.add ("errorMessage", StringHelper.getNotNull (aOutcome.getMessage (), "Document verification failed"));
+      if (aVR.hasVerifierName ())
+        ret.add ("verifierName", aVR.verifierName ());
+      // Tell the submitter whether the document was actually found to be invalid, or whether the
+      // verifier could not make a verdict at all - the reaction to those is very different
+      ret.add ("verificationPerformed", !aOutcome.isServiceUnavailable ());
+      if (aOutcome.hasIssues ())
+      {
+        final JsonArray aIssues = new JsonArray ();
+        for (final VerificationIssue aIssue : aOutcome.getAllIssues ())
+          aIssues.add (aIssue.getAsJson ());
+        ret.add ("verificationIssues", aIssues);
+      }
+    }
+    else
+      ret.add ("errorMessage",
+               StringHelper.getNotNull (aSubmitResult.getErrorMessage (), "Failed to submit outbound transaction"));
+    return ret.getAsJsonString ();
+  }
+
+  /**
+   * Render the sending report, adding the verification warnings if the document was accepted but
+   * the verifiers had remarks. If there are no warnings the response is byte-identical to the
+   * report itself, so the common case keeps its shape.
+   *
+   * @param aSendingReport
+   *        The sending report. May not be <code>null</code>.
+   * @param aSubmitResult
+   *        The successful submit result. May not be <code>null</code>.
+   * @return The JSON body. Never <code>null</code>.
+   */
+  @NonNull
+  private static String _sendingReportJson (@NonNull final Phase4PeppolSendingReport aSendingReport,
+                                            @NonNull final OutboundSubmitResult aSubmitResult)
+  {
+    final VerificationOutcome aOutcome = aSubmitResult.getVerificationOutcome ();
+    if (aOutcome == null || !aOutcome.hasIssues ())
+      return aSendingReport.getAsJsonString ();
+
+    final IJsonObject ret = aSendingReport.getAsJsonObject ();
+    final JsonArray aWarnings = new JsonArray ();
+    for (final VerificationIssue aIssue : aOutcome.getAllIssues ())
+      aWarnings.add (aIssue.getAsJson ());
+    ret.add ("verificationWarnings", aWarnings);
+    return ret.getAsJsonString ();
+  }
+
   private static ResponseEntity <String> _validateCustomFields (@Nullable final String sCustom1,
                                                                 @Nullable final String sCustom2,
                                                                 @Nullable final String sCustom3)
@@ -117,6 +191,94 @@ public class OutboundController
                                                       "' field exceeds the maximum length of " +
                                                       MAX_CUSTOM_FIELD_LENGTH +
                                                       " characters").getAsJsonString ());
+    return null;
+  }
+
+  /**
+   * Validate the SBDH override parameters against the syntax used by the provided document type
+   * identifier. Document types with a non-XML syntax specific ID (like
+   * <code>urn:peppol:doctype:pdf+xml</code> used for the French Factur-X document types) carry
+   * neither an XML root element namespace URI nor an XML root element local name, so phase4 can
+   * derive neither the SBDH <code>Standard</code>, <code>TypeVersion</code> nor <code>Type</code>
+   * from them, and it must be told explicitly that the payload is not XML. Without these parameters
+   * the transmission fails deep inside phase4 - either with "Failed to parse payload InputStream to
+   * a DOM node" or with an unspecific <code>INVALID_PARAMETERS</code> sending result that has no
+   * exception attached at all.
+   *
+   * @param aDocTypeID
+   *        The parsed document type identifier. May not be <code>null</code>.
+   * @param sSbdhStandard
+   *        The SBDH Standard override. May be <code>null</code>.
+   * @param sSbdhTypeVersion
+   *        The SBDH TypeVersion override. May be <code>null</code>.
+   * @param sSbdhType
+   *        The SBDH Type override. May be <code>null</code>.
+   * @param sPayloadMimeType
+   *        The payload MIME type. May be <code>null</code>.
+   * @return A 400 Bad Request response describing the first missing parameter, or <code>null</code>
+   *         if the parameters are consistent with the document type identifier.
+   * @since 0.12.0
+   */
+  @Nullable
+  @VisibleForTesting
+  static ResponseEntity <String> validateNonXMLPayloadParams (@NonNull final IDocumentTypeIdentifier aDocTypeID,
+                                                              @Nullable final String sSbdhStandard,
+                                                              @Nullable final String sSbdhTypeVersion,
+                                                              @Nullable final String sSbdhType,
+                                                              @Nullable final String sPayloadMimeType)
+  {
+    final String sSyntaxSpecificID;
+    try
+    {
+      sSyntaxSpecificID = PeppolGenericDocumentTypeIdentifierParts.extractFromIdentifier (aDocTypeID)
+                                                                  .getSyntaxSpecificID ();
+    }
+    catch (final IllegalArgumentException ex)
+    {
+      // Not an OpenPeppol document type identifier layout - nothing to check here
+      return null;
+    }
+
+    if (PeppolDocumentTypeIdentifierParts.isSyntaxSpecificIDLookingLikeXML (sSyntaxSpecificID))
+    {
+      // XML syntax - all SBDH fields can be derived from the document type ID
+      if (StringHelper.isNotEmpty (sPayloadMimeType))
+        LOGGER.warn ("The document type ID '" +
+                     aDocTypeID.getURIEncoded () +
+                     "' uses the XML syntax '" +
+                     sSyntaxSpecificID +
+                     "' but the payload MIME type '" +
+                     sPayloadMimeType +
+                     "' was provided. The payload will be wrapped in a 'BinaryContent' element, which the receiver most likely does not expect.");
+      return null;
+    }
+
+    // Non-XML syntax - everything must be provided from the outside
+    final String sPrefix = "The document type ID '" +
+                           aDocTypeID.getURIEncoded () +
+                           "' uses the non-XML syntax '" +
+                           sSyntaxSpecificID +
+                           "'. The '";
+    if (StringHelper.isEmpty (sPayloadMimeType))
+      return ResponseEntity.badRequest ()
+                           .body (JsonValue.create (sPrefix +
+                                                    "payloadMimeType' parameter is mandatory for such document types, because the payload cannot be parsed as XML")
+                                           .getAsJsonString ());
+    if (StringHelper.isEmpty (sSbdhStandard))
+      return ResponseEntity.badRequest ()
+                           .body (JsonValue.create (sPrefix +
+                                                    "sbdhStandard' parameter is mandatory for such document types, because the SBDH Standard cannot be derived from the document type ID")
+                                           .getAsJsonString ());
+    if (StringHelper.isEmpty (sSbdhTypeVersion))
+      return ResponseEntity.badRequest ()
+                           .body (JsonValue.create (sPrefix +
+                                                    "sbdhTypeVersion' parameter is mandatory for such document types, because the SBDH TypeVersion cannot be derived from the document type ID")
+                                           .getAsJsonString ());
+    if (StringHelper.isEmpty (sSbdhType))
+      return ResponseEntity.badRequest ()
+                           .body (JsonValue.create (sPrefix +
+                                                    "sbdhType' parameter is mandatory for such document types, because the SBDH Type cannot be derived from the document type ID")
+                                           .getAsJsonString ());
     return null;
   }
 
@@ -167,14 +329,15 @@ public class OutboundController
                             "Returns a Phase4PeppolSendingReport as JSON.")
   @ApiResponses ({ @ApiResponse (responseCode = "200", description = "Document accepted and sent successfully"),
                    @ApiResponse (responseCode = "400",
-                                 description = "Invalid Peppol identifier (sender, receiver, document type or process)"),
+                                 description = "Invalid Peppol identifier (sender, receiver, document type or process), or missing SBDH parameters for a non-XML document type"),
                    @ApiResponse (responseCode = "401",
                                  description = "Missing or invalid API token",
                                  content = @Content),
                    @ApiResponse (responseCode = "404",
                                  description = "Sending is disabled in the configuration",
                                  content = @Content),
-                   @ApiResponse (responseCode = "422", description = "Sending failed — see the report body for details") })
+                   @ApiResponse (responseCode = "422",
+                                 description = "Sending failed — see the report body for details") })
   public ResponseEntity <String> submitRawDocument (@Parameter (description = "Peppol Participant ID of the sender (C1)",
                                                                 required = true,
                                                                 example = "iso6523-actorid-upis::0088:senderbackend") @PathVariable ("senderID") final String sSenderID,
@@ -192,23 +355,23 @@ public class OutboundController
                                                                 example = "AT") @PathVariable ("c1CountryCode") final String sC1CountryCode,
                                                     @Parameter (hidden = true) @NonNull final HttpServletRequest aServletRequest,
                                                     @Parameter (description = "Custom SBDH Instance Identifier. A random UUID-based identifier is generated when omitted.") @RequestParam (value = "sbdhInstanceID",
-                                                                                                                                                                                            required = false) final String sSbdhInstanceID,
+                                                                                                                                                                                           required = false) final String sSbdhInstanceID,
                                                     @Parameter (description = "Alternative Peppol Participant ID to receive MLS responses") @RequestParam (value = "mlsTo",
-                                                                                                                                                            required = false) final String sMlsTo,
-                                                    @Parameter (description = "SBDH Standard override for non-XML payloads (e.g., urn:peppol:doctype:pdf+xml). Auto-derived from the document type when omitted.") @RequestParam (value = "sbdhStandard",
-                                                                                                                                                                                                                                  required = false) final String sSbdhStandard,
-                                                    @Parameter (description = "SBDH TypeVersion override (e.g., 0). Auto-derived from the document type when omitted.") @RequestParam (value = "sbdhTypeVersion",
-                                                                                                                                                                                       required = false) final String sSbdhTypeVersion,
-                                                    @Parameter (description = "SBDH Type override (e.g., factur-x). Auto-derived from the document type when omitted.") @RequestParam (value = "sbdhType",
-                                                                                                                                                                                       required = false) final String sSbdhType,
-                                                    @Parameter (description = "MIME type for binary payloads (e.g., application/pdf). When set, the payload is wrapped in <BinaryContent>; otherwise treated as XML.") @RequestParam (value = "payloadMimeType",
-                                                                                                                                                                                                                                      required = false) final String sPayloadMimeType,
+                                                                                                                                                           required = false) final String sMlsTo,
+                                                    @Parameter (description = "SBDH Standard override for non-XML payloads (e.g., urn:peppol:doctype:pdf+xml). Auto-derived from the document type when omitted, but mandatory for document types with a non-XML syntax specific ID.") @RequestParam (value = "sbdhStandard",
+                                                                                                                                                                                                                                                                                                      required = false) final String sSbdhStandard,
+                                                    @Parameter (description = "SBDH TypeVersion override (e.g., 0). Auto-derived from the document type when omitted, but mandatory for document types with a non-XML syntax specific ID.") @RequestParam (value = "sbdhTypeVersion",
+                                                                                                                                                                                                                                                           required = false) final String sSbdhTypeVersion,
+                                                    @Parameter (description = "SBDH Type override (e.g., factur-x). Auto-derived from the document type when omitted, but mandatory for document types with a non-XML syntax specific ID.") @RequestParam (value = "sbdhType",
+                                                                                                                                                                                                                                                           required = false) final String sSbdhType,
+                                                    @Parameter (description = "MIME type for binary payloads (e.g., application/pdf). When set, the payload is wrapped in <BinaryContent>; otherwise treated as XML. Mandatory for document types with a non-XML syntax specific ID.") @RequestParam (value = "payloadMimeType",
+                                                                                                                                                                                                                                                                                                      required = false) final String sPayloadMimeType,
                                                     @Parameter (description = "Optional custom field 1 (max 255 characters). Stored with the transaction and returned by the status APIs.") @RequestParam (value = "custom1",
-                                                                                                                                                                                                          required = false) final String sCustom1,
+                                                                                                                                                                                                           required = false) final String sCustom1,
                                                     @Parameter (description = "Optional custom field 2 (max 255 characters). Stored with the transaction and returned by the status APIs.") @RequestParam (value = "custom2",
-                                                                                                                                                                                                          required = false) final String sCustom2,
+                                                                                                                                                                                                           required = false) final String sCustom2,
                                                     @Parameter (description = "Optional custom field 3 (max 255 characters). Stored with the transaction and returned by the status APIs.") @RequestParam (value = "custom3",
-                                                                                                                                                                                                          required = false) final String sCustom3) throws Exception
+                                                                                                                                                                                                           required = false) final String sCustom3) throws Exception
   {
     if (!APCoreConfig.isSendingEnabled ())
     {
@@ -280,42 +443,50 @@ public class OutboundController
                                            .getAsJsonString ());
     }
 
+    final ResponseEntity <String> aSbdhErr = validateNonXMLPayloadParams (aDocTypeID,
+                                                                          sSbdhStandard,
+                                                                          sSbdhTypeVersion,
+                                                                          sSbdhType,
+                                                                          sPayloadMimeType);
+    if (aSbdhErr != null)
+      return aSbdhErr;
+
     // Read the InputStream only once
     try (final InputStream aIS = aServletRequest.getInputStream ())
     {
       // Store in DB
-      final IOutboundTransaction aTx = OutboundOrchestrator.submitRawDocument ("[SubmitRaw] ",
-                                                                               aSenderID,
-                                                                               aReceiverID,
-                                                                               aDocTypeID,
-                                                                               aProcessID,
-                                                                               sEffectiveSbdhInstanceID,
-                                                                               sC1CountryCode,
-                                                                               aIS,
-                                                                               sMlsTo,
-                                                                               sSbdhStandard,
-                                                                               sSbdhTypeVersion,
-                                                                               sSbdhType,
-                                                                               sPayloadMimeType,
-                                                                               sCustom1,
-                                                                               sCustom2,
-                                                                               sCustom3);
-      if (aTx == null)
+      final OutboundSubmitResult aSubmitResult = OutboundOrchestrator.submitRawDocument ("[SubmitRaw] ",
+                                                                                         aSenderID,
+                                                                                         aReceiverID,
+                                                                                         aDocTypeID,
+                                                                                         aProcessID,
+                                                                                         sEffectiveSbdhInstanceID,
+                                                                                         sC1CountryCode,
+                                                                                         aIS,
+                                                                                         sMlsTo,
+                                                                                         sSbdhStandard,
+                                                                                         sSbdhTypeVersion,
+                                                                                         sSbdhType,
+                                                                                         sPayloadMimeType,
+                                                                                         sCustom1,
+                                                                                         sCustom2,
+                                                                                         sCustom3);
+      if (aSubmitResult.isFailure ())
       {
-        return ResponseEntity.unprocessableContent ()
-                             .body (JsonValue.create ("Failed to submit outbound transaction").getAsJsonString ());
+        return ResponseEntity.unprocessableContent ().body (_submitErrorJson (aSubmitResult));
       }
+      final IOutboundTransaction aTx = aSubmitResult.getTransaction ();
 
       // Perform actual sending
       final Phase4PeppolSendingReport aSendingReport = OutboundOrchestrator.processPendingOutbound ("[SubmitRaw] ",
                                                                                                     aTx);
       if (!aSendingReport.isOverallSuccess ())
       {
-        return ResponseEntity.unprocessableContent ().body (aSendingReport.getAsJsonString ());
+        return ResponseEntity.unprocessableContent ().body (_sendingReportJson (aSendingReport, aSubmitResult));
       }
 
       // Sending success
-      return ResponseEntity.ok (aSendingReport.getAsJsonString ());
+      return ResponseEntity.ok (_sendingReportJson (aSendingReport, aSubmitResult));
     }
   }
 
@@ -349,16 +520,17 @@ public class OutboundController
                    @ApiResponse (responseCode = "404",
                                  description = "Sending is disabled in the configuration",
                                  content = @Content),
-                   @ApiResponse (responseCode = "422", description = "Sending failed — see the report body for details") })
+                   @ApiResponse (responseCode = "422",
+                                 description = "Sending failed — see the report body for details") })
   public ResponseEntity <String> submitPrebuiltSBD (@Parameter (hidden = true) @NonNull final HttpServletRequest aServletRequest,
                                                     @Parameter (description = "Alternative Peppol Participant ID to receive MLS responses") @RequestParam (value = "mlsTo",
-                                                                                                                                                            required = false) final String sMlsTo,
+                                                                                                                                                           required = false) final String sMlsTo,
                                                     @Parameter (description = "Optional custom field 1 (max 255 characters). Stored with the transaction and returned by the status APIs.") @RequestParam (value = "custom1",
-                                                                                                                                                                                                          required = false) final String sCustom1,
+                                                                                                                                                                                                           required = false) final String sCustom1,
                                                     @Parameter (description = "Optional custom field 2 (max 255 characters). Stored with the transaction and returned by the status APIs.") @RequestParam (value = "custom2",
-                                                                                                                                                                                                          required = false) final String sCustom2,
+                                                                                                                                                                                                           required = false) final String sCustom2,
                                                     @Parameter (description = "Optional custom field 3 (max 255 characters). Stored with the transaction and returned by the status APIs.") @RequestParam (value = "custom3",
-                                                                                                                                                                                                          required = false) final String sCustom3) throws Exception
+                                                                                                                                                                                                           required = false) final String sCustom3) throws Exception
   {
     if (!APCoreConfig.isSendingEnabled ())
     {
@@ -374,28 +546,29 @@ public class OutboundController
     try (final InputStream aIS = aServletRequest.getInputStream ())
     {
       // Store in DB
-      final IOutboundTransaction aTx = OutboundOrchestrator.submitPrebuiltSBD ("[SubmitPrebuiltSBD] ",
-                                                                               aIS,
-                                                                               sMlsTo,
-                                                                               sCustom1,
-                                                                               sCustom2,
-                                                                               sCustom3);
-      if (aTx == null)
+      final OutboundSubmitResult aSubmitResult = OutboundOrchestrator.submitPrebuiltSBD ("[SubmitPrebuiltSBD] ",
+                                                                                         aIS,
+                                                                                         sMlsTo,
+                                                                                         sCustom1,
+                                                                                         sCustom2,
+                                                                                         sCustom3);
+      if (aSubmitResult.isFailure ())
       {
-        return ResponseEntity.badRequest ()
-                             .body (JsonValue.create ("Failed to submit outbound SBD transaction").getAsJsonString ());
+        // Deliberately kept at 400 - this endpoint answered 400 before the structured error body
+        return ResponseEntity.badRequest ().body (_submitErrorJson (aSubmitResult));
       }
+      final IOutboundTransaction aTx = aSubmitResult.getTransaction ();
 
       // Perform actual sending
       final Phase4PeppolSendingReport aSendingReport = OutboundOrchestrator.processPendingOutbound ("[SubmitPrebuiltSBD] ",
                                                                                                     aTx);
       if (!aSendingReport.isOverallSuccess ())
       {
-        return ResponseEntity.unprocessableContent ().body (aSendingReport.getAsJsonString ());
+        return ResponseEntity.unprocessableContent ().body (_sendingReportJson (aSendingReport, aSubmitResult));
       }
 
       // Sending success
-      return ResponseEntity.ok (aSendingReport.getAsJsonString ());
+      return ResponseEntity.ok (_sendingReportJson (aSendingReport, aSubmitResult));
     }
   }
 
@@ -442,7 +615,8 @@ public class OutboundController
                    @ApiResponse (responseCode = "404",
                                  description = "Sending is disabled in the configuration",
                                  content = @Content),
-                   @ApiResponse (responseCode = "422", description = "Sending failed — see the report body for details") })
+                   @ApiResponse (responseCode = "422",
+                                 description = "Sending failed — see the report body for details") })
   public ResponseEntity <String> submitAutoDetect (@Parameter (description = "Peppol Participant ID of the sender (C1)",
                                                                required = true,
                                                                example = "iso6523-actorid-upis::0088:senderbackend") @PathVariable ("senderID") final String sSenderID,
@@ -454,15 +628,15 @@ public class OutboundController
                                                                example = "AT") @PathVariable ("c1CountryCode") final String sC1CountryCode,
                                                    @Parameter (hidden = true) @NonNull final HttpServletRequest aServletRequest,
                                                    @Parameter (description = "Custom SBDH Instance Identifier. A random UUID-based identifier is generated when omitted.") @RequestParam (value = "sbdhInstanceID",
-                                                                                                                                                                                           required = false) final String sSbdhInstanceID,
+                                                                                                                                                                                          required = false) final String sSbdhInstanceID,
                                                    @Parameter (description = "Alternative Peppol Participant ID to receive MLS responses") @RequestParam (value = "mlsTo",
-                                                                                                                                                           required = false) final String sMlsTo,
+                                                                                                                                                          required = false) final String sMlsTo,
                                                    @Parameter (description = "Optional custom field 1 (max 255 characters). Stored with the transaction and returned by the status APIs.") @RequestParam (value = "custom1",
-                                                                                                                                                                                                         required = false) final String sCustom1,
+                                                                                                                                                                                                          required = false) final String sCustom1,
                                                    @Parameter (description = "Optional custom field 2 (max 255 characters). Stored with the transaction and returned by the status APIs.") @RequestParam (value = "custom2",
-                                                                                                                                                                                                         required = false) final String sCustom2,
+                                                                                                                                                                                                          required = false) final String sCustom2,
                                                    @Parameter (description = "Optional custom field 3 (max 255 characters). Stored with the transaction and returned by the status APIs.") @RequestParam (value = "custom3",
-                                                                                                                                                                                                         required = false) final String sCustom3) throws Exception
+                                                                                                                                                                                                          required = false) final String sCustom3) throws Exception
   {
     if (!APCoreConfig.isSendingEnabled ())
     {
@@ -554,32 +728,35 @@ public class OutboundController
     // Submit via the standard outbound pipeline
     try (final InputStream aPayloadIS = new java.io.ByteArrayInputStream (aPayloadBytes))
     {
-      final IOutboundTransaction aTx = OutboundOrchestrator.submitRawDocument (sLogPrefix,
-                                                                               aSenderID,
-                                                                               aReceiverID,
-                                                                               aDocTypeID,
-                                                                               aProcessID,
-                                                                               sEffectiveSbdhInstanceID,
-                                                                               sC1CountryCode,
-                                                                               aPayloadIS,
-                                                                               sMlsTo,
-                                                                               null,
-                                                                               null,
-                                                                               null,
-                                                                               null,
-                                                                               sCustom1,
-                                                                               sCustom2,
-                                                                               sCustom3);
-      if (aTx == null)
-        return ResponseEntity.badRequest ()
-                             .body (JsonValue.create ("Failed to submit outbound transaction").getAsJsonString ());
+      final OutboundSubmitResult aSubmitResult = OutboundOrchestrator.submitRawDocument (sLogPrefix,
+                                                                                         aSenderID,
+                                                                                         aReceiverID,
+                                                                                         aDocTypeID,
+                                                                                         aProcessID,
+                                                                                         sEffectiveSbdhInstanceID,
+                                                                                         sC1CountryCode,
+                                                                                         aPayloadIS,
+                                                                                         sMlsTo,
+                                                                                         null,
+                                                                                         null,
+                                                                                         null,
+                                                                                         null,
+                                                                                         sCustom1,
+                                                                                         sCustom2,
+                                                                                         sCustom3);
+      if (aSubmitResult.isFailure ())
+      {
+        // Deliberately kept at 400 - this endpoint answered 400 before the structured error body
+        return ResponseEntity.badRequest ().body (_submitErrorJson (aSubmitResult));
+      }
+      final IOutboundTransaction aTx = aSubmitResult.getTransaction ();
 
       // Perform actual sending
       final Phase4PeppolSendingReport aSendingReport = OutboundOrchestrator.processPendingOutbound (sLogPrefix, aTx);
       if (!aSendingReport.isOverallSuccess ())
-        return ResponseEntity.unprocessableContent ().body (aSendingReport.getAsJsonString ());
+        return ResponseEntity.unprocessableContent ().body (_sendingReportJson (aSendingReport, aSubmitResult));
 
-      return ResponseEntity.ok (aSendingReport.getAsJsonString ());
+      return ResponseEntity.ok (_sendingReportJson (aSendingReport, aSubmitResult));
     }
   }
 
@@ -601,16 +778,18 @@ public class OutboundController
               description = "Submits a document for outbound sending by referencing an S3 object instead of inlining the payload. " +
                             "The Sender Backend uploads the document to S3 first, then calls this endpoint. " +
                             "Requires 'outbound.s3.enabled=true'. Since v0.1.1.")
-  @ApiResponses ({ @ApiResponse (responseCode = "200", description = "Document fetched, accepted and sent successfully"),
+  @ApiResponses ({ @ApiResponse (responseCode = "200",
+                                 description = "Document fetched, accepted and sent successfully"),
                    @ApiResponse (responseCode = "400",
-                                 description = "Outbound S3 disabled, missing required fields, invalid identifiers, or S3 fetch failed"),
+                                 description = "Outbound S3 disabled, missing required fields, invalid identifiers, missing SBDH parameters for a non-XML document type, or S3 fetch failed"),
                    @ApiResponse (responseCode = "401",
                                  description = "Missing or invalid API token",
                                  content = @Content),
                    @ApiResponse (responseCode = "404",
                                  description = "Sending is disabled in the configuration",
                                  content = @Content),
-                   @ApiResponse (responseCode = "422", description = "Sending failed — see the report body for details") })
+                   @ApiResponse (responseCode = "422",
+                                 description = "Sending failed — see the report body for details") })
   public ResponseEntity <String> submitFromS3 (@RequestBody final OutboundS3SubmitRequest aRequest)
   {
     if (!APCoreConfig.isSendingEnabled ())
@@ -628,11 +807,11 @@ public class OutboundController
 
     // Validate required fields
     if (StringHelper.isEmpty (aRequest.getSenderID ()) ||
-      StringHelper.isEmpty (aRequest.getReceiverID ()) ||
-      StringHelper.isEmpty (aRequest.getDocTypeID ()) ||
-      StringHelper.isEmpty (aRequest.getProcessID ()) ||
-      StringHelper.isEmpty (aRequest.getC1CountryCode ()) ||
-      StringHelper.isEmpty (aRequest.getS3Key ()))
+        StringHelper.isEmpty (aRequest.getReceiverID ()) ||
+        StringHelper.isEmpty (aRequest.getDocTypeID ()) ||
+        StringHelper.isEmpty (aRequest.getProcessID ()) ||
+        StringHelper.isEmpty (aRequest.getC1CountryCode ()) ||
+        StringHelper.isEmpty (aRequest.getS3Key ()))
     {
       return ResponseEntity.badRequest ()
                            .body (JsonValue.create ("Missing required fields: senderID, receiverID, docTypeID, processID, c1CountryCode, s3Key")
@@ -694,6 +873,14 @@ public class OutboundController
                                            .getAsJsonString ());
     }
 
+    final ResponseEntity <String> aSbdhErr = validateNonXMLPayloadParams (aDocTypeID,
+                                                                          aRequest.getSbdhStandard (),
+                                                                          aRequest.getSbdhTypeVersion (),
+                                                                          aRequest.getSbdhType (),
+                                                                          aRequest.getPayloadMimeType ());
+    if (aSbdhErr != null)
+      return aSbdhErr;
+
     // Determine the S3 region - use from configuration
     final String sS3Region = APCoreConfig.getOutboundS3Region ();
     if (StringHelper.isEmpty (sS3Region))
@@ -744,37 +931,36 @@ public class OutboundController
                                                                       .build ()))
     {
       // Store in DB
-      final IOutboundTransaction aTx = OutboundOrchestrator.submitRawDocument ("[SubmitS3] ",
-                                                                               aSenderID,
-                                                                               aReceiverID,
-                                                                               aDocTypeID,
-                                                                               aProcessID,
-                                                                               sEffectiveSbdhInstanceID,
-                                                                               aRequest.getC1CountryCode (),
-                                                                               aIS,
-                                                                               aRequest.getMlsTo (),
-                                                                               aRequest.getSbdhStandard (),
-                                                                               aRequest.getSbdhTypeVersion (),
-                                                                               aRequest.getSbdhType (),
-                                                                               aRequest.getPayloadMimeType (),
-                                                                               aRequest.getCustom1 (),
-                                                                               aRequest.getCustom2 (),
-                                                                               aRequest.getCustom3 ());
-      if (aTx == null)
+      final OutboundSubmitResult aSubmitResult = OutboundOrchestrator.submitRawDocument ("[SubmitS3] ",
+                                                                                         aSenderID,
+                                                                                         aReceiverID,
+                                                                                         aDocTypeID,
+                                                                                         aProcessID,
+                                                                                         sEffectiveSbdhInstanceID,
+                                                                                         aRequest.getC1CountryCode (),
+                                                                                         aIS,
+                                                                                         aRequest.getMlsTo (),
+                                                                                         aRequest.getSbdhStandard (),
+                                                                                         aRequest.getSbdhTypeVersion (),
+                                                                                         aRequest.getSbdhType (),
+                                                                                         aRequest.getPayloadMimeType (),
+                                                                                         aRequest.getCustom1 (),
+                                                                                         aRequest.getCustom2 (),
+                                                                                         aRequest.getCustom3 ());
+      if (aSubmitResult.isFailure ())
       {
-        return ResponseEntity.unprocessableContent ()
-                             .body (JsonValue.create ("Failed to submit outbound transaction from S3")
-                                             .getAsJsonString ());
+        return ResponseEntity.unprocessableContent ().body (_submitErrorJson (aSubmitResult));
       }
+      final IOutboundTransaction aTx = aSubmitResult.getTransaction ();
 
       // Perform actual sending
       final Phase4PeppolSendingReport aSendingReport = OutboundOrchestrator.processPendingOutbound ("[SubmitS3] ", aTx);
       if (!aSendingReport.isOverallSuccess ())
       {
-        return ResponseEntity.unprocessableContent ().body (aSendingReport.getAsJsonString ());
+        return ResponseEntity.unprocessableContent ().body (_sendingReportJson (aSendingReport, aSubmitResult));
       }
 
-      return ResponseEntity.ok (aSendingReport.getAsJsonString ());
+      return ResponseEntity.ok (_sendingReportJson (aSendingReport, aSubmitResult));
     }
     catch (final Exception ex)
     {
@@ -812,7 +998,7 @@ public class OutboundController
                                                                              required = true,
                                                                              example = "550e8400-e29b-41d4-a716-446655440000") @PathVariable ("sbdhInstanceID") final String sSbdhInstanceID,
                                                                  @Parameter (description = "When true, the archive table is consulted if the transaction is not in the active table. Since 0.9.0.") @RequestParam (name = "includeArchive",
-                                                                                                                                                                                                                    defaultValue = "false") final boolean bIncludeArchive)
+                                                                                                                                                                                                                   defaultValue = "false") final boolean bIncludeArchive)
   {
     LOGGER.info ("Checking for status of transmission with ID '" +
                  sSbdhInstanceID +

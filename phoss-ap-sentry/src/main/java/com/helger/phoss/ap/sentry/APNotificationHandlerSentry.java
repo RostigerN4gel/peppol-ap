@@ -16,13 +16,19 @@
  */
 package com.helger.phoss.ap.sentry;
 
+import java.time.OffsetDateTime;
 import java.time.YearMonth;
 import java.util.Map;
 
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
+import com.helger.base.enforce.ValueEnforcer;
+import com.helger.collection.commons.CommonsLinkedHashMap;
+import com.helger.collection.commons.ICommonsOrderedMap;
 import com.helger.peppol.mls.EPeppolMLSResponseCode;
+import com.helger.phoss.ap.api.model.MlsOutcome;
+import com.helger.phoss.ap.api.model.VerifierResult;
 import com.helger.phoss.ap.api.spi.IAPNotificationHandlerSPI;
 
 import io.sentry.Sentry;
@@ -39,31 +45,91 @@ import io.sentry.logger.SentryLogParameters;
  */
 public class APNotificationHandlerSentry implements IAPNotificationHandlerSPI
 {
+  /**
+   * Create the Sentry attribute map from alternating key-value pairs. Contrary to
+   * {@link Map#of(Object, Object)} <code>null</code> values are allowed - the respective attribute
+   * is simply not part of the resulting map, because Sentry has no representation for "no value".
+   *
+   * @param aKeyValuePairs
+   *        Alternating keys (of type String) and values. May not be <code>null</code> and the
+   *        length must be even.
+   * @return The map with all non-<code>null</code> values, in the order of the parameters. Never
+   *         <code>null</code>.
+   */
+  @NonNull
+  private static Map <String, Object> _params (@NonNull final Object... aKeyValuePairs)
+  {
+    ValueEnforcer.isTrue (aKeyValuePairs.length % 2 == 0, "The number of key-value parameters must be even");
+
+    final ICommonsOrderedMap <String, Object> ret = new CommonsLinkedHashMap <> ();
+    for (int i = 0; i < aKeyValuePairs.length; i += 2)
+      ret.putIfNotNull ((String) aKeyValuePairs[i], aKeyValuePairs[i + 1]);
+    return ret;
+  }
+
   private static void _logError (@NonNull final String sMsg, @NonNull final Map <String, Object> aParams)
   {
     Sentry.logger ().log (SentryLogLevel.ERROR, SentryLogParameters.create (SentryAttributes.fromMap (aParams)), sMsg);
   }
 
+  private static void _logWarn (@NonNull final String sMsg, @NonNull final Map <String, Object> aParams)
+  {
+    Sentry.logger ().log (SentryLogLevel.WARN, SentryLogParameters.create (SentryAttributes.fromMap (aParams)), sMsg);
+  }
+
   /** {@inheritDoc} */
   public void onInboundVerificationRejection (@NonNull final String sTransactionID,
                                               @NonNull final String sSbdhInstanceID,
-                                              @Nullable final String sErrorDetails)
+                                              @Nullable final String sErrorDetails,
+                                              @NonNull final MlsOutcome aMlsOutcome)
   {
     _logError ("onInboundVerificationRejection",
-               Map.of ("transactionID",
+               _params ("transactionID",
+                        sTransactionID,
+                        "sbdhInstanceID",
+                        sSbdhInstanceID,
+                        "errorDetails",
+                        sErrorDetails,
+                        "mlsResponseCode",
+                        aMlsOutcome.getResponseCodeID (),
+                        "issueCount",
+                        Integer.toString (aMlsOutcome.getIssues ().size ())));
+  }
+
+  /** {@inheritDoc} */
+  public void onInboundVerificationDeferred (@NonNull final String sTransactionID,
+                                             @NonNull final String sSbdhInstanceID,
+                                             @NonNull final String sVerifierName,
+                                             @NonNull final OffsetDateTime aNextRetryDT,
+                                             @Nullable final String sErrorDetails)
+  {
+    // Deliberately a warning - the document is not lost, but the verifier needs attention
+    _logWarn ("onInboundVerificationDeferred",
+              _params ("transactionID",
                        sTransactionID,
                        "sbdhInstanceID",
                        sSbdhInstanceID,
+                       "verifierName",
+                       sVerifierName,
+                       "nextRetryDT",
+                       aNextRetryDT,
                        "errorDetails",
                        sErrorDetails));
   }
 
   /** {@inheritDoc} */
   public void onOutboundVerificationRejection (@NonNull final String sSbdhInstanceID,
-                                               @Nullable final String sErrorDetails)
+                                               @NonNull final VerifierResult aVerifierResult)
   {
     _logError ("onOutboundVerificationRejection",
-               Map.of ("sbdhInstanceID", sSbdhInstanceID, "errorDetails", sErrorDetails));
+               _params ("sbdhInstanceID",
+                        sSbdhInstanceID,
+                        "verifierName",
+                        aVerifierResult.verifierName (),
+                        "errorDetails",
+                        aVerifierResult.outcome ().getMessage (),
+                        "issueCount",
+                        Integer.toString (aVerifierResult.outcome ().getAllIssues ().size ())));
   }
 
   /** {@inheritDoc} */
@@ -72,12 +138,12 @@ public class APNotificationHandlerSentry implements IAPNotificationHandlerSPI
                                                  @Nullable final String sErrorDetails)
   {
     _logError ("onPermanentSendingFailure",
-               Map.of ("transactionID",
-                       sTransactionID,
-                       "sbdhInstanceID",
-                       sSbdhInstanceID,
-                       "errorDetails",
-                       sErrorDetails));
+               _params ("transactionID",
+                        sTransactionID,
+                        "sbdhInstanceID",
+                        sSbdhInstanceID,
+                        "errorDetails",
+                        sErrorDetails));
   }
 
   /** {@inheritDoc} */
@@ -88,16 +154,16 @@ public class APNotificationHandlerSentry implements IAPNotificationHandlerSPI
                                             @NonNull final String sSbdhInstanceID)
   {
     _logError ("onInboundReceiverNotServiced",
-               Map.of ("senderID",
-                       sSenderID,
-                       "receiverID",
-                       sReceiverID,
-                       "docTypeID",
-                       sDocTypeID,
-                       "processID",
-                       sProcessID,
-                       "sbdhInstanceID",
-                       sSbdhInstanceID));
+               _params ("senderID",
+                        sSenderID,
+                        "receiverID",
+                        sReceiverID,
+                        "docTypeID",
+                        sDocTypeID,
+                        "processID",
+                        sProcessID,
+                        "sbdhInstanceID",
+                        sSbdhInstanceID));
   }
 
   /** {@inheritDoc} */
@@ -106,12 +172,12 @@ public class APNotificationHandlerSentry implements IAPNotificationHandlerSPI
                                                    @Nullable final String sErrorDetails)
   {
     _logError ("onPermanentForwardingFailure",
-               Map.of ("transactionID",
-                       sTransactionID,
-                       "sbdhInstanceID",
-                       sSbdhInstanceID,
-                       "errorDetails",
-                       sErrorDetails));
+               _params ("transactionID",
+                        sTransactionID,
+                        "sbdhInstanceID",
+                        sSbdhInstanceID,
+                        "errorDetails",
+                        sErrorDetails));
   }
 
   /** {@inheritDoc} */
@@ -127,26 +193,26 @@ public class APNotificationHandlerSentry implements IAPNotificationHandlerSPI
                                           @NonNull final String sErrorDetails)
   {
     _logError ("onInboundDuplicateRejected",
-               Map.of ("senderID",
-                       sSenderID,
-                       "receiverID",
-                       sReceiverID,
-                       "docTypeID",
-                       sDocTypeID,
-                       "processID",
-                       sProcessID,
-                       "senderProviderID",
-                       sSenderProviderID,
-                       "AS4MessageID",
-                       sAS4MessageID,
-                       "sbdhInstanceID",
-                       sSbdhInstanceID,
-                       "isDuplicateAS4",
-                       Boolean.valueOf (bIsDuplicateAS4),
-                       "isDuplicateSBDH",
-                       Boolean.valueOf (bIsDuplicateSBDH),
-                       "errorDetails",
-                       sErrorDetails));
+               _params ("senderID",
+                        sSenderID,
+                        "receiverID",
+                        sReceiverID,
+                        "docTypeID",
+                        sDocTypeID,
+                        "processID",
+                        sProcessID,
+                        "senderProviderID",
+                        sSenderProviderID,
+                        "AS4MessageID",
+                        sAS4MessageID,
+                        "sbdhInstanceID",
+                        sSbdhInstanceID,
+                        "isDuplicateAS4",
+                        Boolean.valueOf (bIsDuplicateAS4),
+                        "isDuplicateSBDH",
+                        Boolean.valueOf (bIsDuplicateSBDH),
+                        "errorDetails",
+                        sErrorDetails));
   }
 
   /** {@inheritDoc} */
@@ -155,12 +221,12 @@ public class APNotificationHandlerSentry implements IAPNotificationHandlerSPI
                                             @NonNull final EPeppolMLSResponseCode eMlsResponseCode)
   {
     _logError ("onInboundMLSCorrelationError",
-               Map.of ("transactionID",
-                       sTransactionID,
-                       "referencedSbdhInstanceID",
-                       sReferencedSbdhInstanceID,
-                       "mlsResponseCode",
-                       eMlsResponseCode.getID ()));
+               _params ("transactionID",
+                        sTransactionID,
+                        "referencedSbdhInstanceID",
+                        sReferencedSbdhInstanceID,
+                        "mlsResponseCode",
+                        eMlsResponseCode.getID ()));
   }
 
   /** {@inheritDoc} */
@@ -170,41 +236,41 @@ public class APNotificationHandlerSentry implements IAPNotificationHandlerSPI
                                           @NonNull final String sFallbackDefaultSpidParticipantID)
   {
     _logError ("onSpecialMlsToNotReachable",
-               Map.of ("outboundTransactionID",
-                       sOutboundTransactionID,
-                       "referencedSbdhInstanceID",
-                       sReferencedSbdhInstanceID,
-                       "attemptedMlsToParticipantID",
-                       sAttemptedMlsToParticipantID,
-                       "fallbackDefaultSpidParticipantID",
-                       sFallbackDefaultSpidParticipantID));
+               _params ("outboundTransactionID",
+                        sOutboundTransactionID,
+                        "referencedSbdhInstanceID",
+                        sReferencedSbdhInstanceID,
+                        "attemptedMlsToParticipantID",
+                        sAttemptedMlsToParticipantID,
+                        "fallbackDefaultSpidParticipantID",
+                        sFallbackDefaultSpidParticipantID));
   }
 
   /** {@inheritDoc} */
   public void onInboundForwardingError (@NonNull final String sTransactionID, final boolean bIsRetry)
   {
     _logError ("onInboundForwardingError",
-               Map.of ("transactionID", sTransactionID, "isRetry", Boolean.valueOf (bIsRetry)));
+               _params ("transactionID", sTransactionID, "isRetry", Boolean.valueOf (bIsRetry)));
   }
 
   /** {@inheritDoc} */
   public void onPeppolReportingTSRFailure (@NonNull final YearMonth aYearMonth)
   {
     _logError ("onPeppolReportingTSRFailure",
-               Map.of ("year",
-                       Integer.valueOf (aYearMonth.getYear ()),
-                       "month",
-                       Integer.valueOf (aYearMonth.getMonthValue ())));
+               _params ("year",
+                        Integer.valueOf (aYearMonth.getYear ()),
+                        "month",
+                        Integer.valueOf (aYearMonth.getMonthValue ())));
   }
 
   /** {@inheritDoc} */
   public void onPeppolReportingEUSRFailure (@NonNull final YearMonth aYearMonth)
   {
     _logError ("onPeppolReportingEUSRFailure",
-               Map.of ("year",
-                       Integer.valueOf (aYearMonth.getYear ()),
-                       "month",
-                       Integer.valueOf (aYearMonth.getMonthValue ())));
+               _params ("year",
+                        Integer.valueOf (aYearMonth.getYear ()),
+                        "month",
+                        Integer.valueOf (aYearMonth.getMonthValue ())));
   }
 
   /** {@inheritDoc} */

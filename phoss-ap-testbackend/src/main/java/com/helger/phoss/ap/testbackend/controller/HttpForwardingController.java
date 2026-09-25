@@ -165,7 +165,7 @@ public class HttpForwardingController
     if (aDoc == null)
       return ResponseEntity.internalServerError ().build ();
 
-    Thread.startVirtualThread ( () -> {
+    Thread.startVirtualThread (() -> {
       try
       {
         // Make sure sync response is received first

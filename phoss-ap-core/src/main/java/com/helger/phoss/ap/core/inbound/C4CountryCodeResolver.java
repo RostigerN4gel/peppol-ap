@@ -59,9 +59,9 @@ public final class C4CountryCodeResolver
   private static boolean _isValidCountryCode (@Nullable final String sCountryCode)
   {
     return sCountryCode != null &&
-      sCountryCode.length () == 2 &&
-      Character.isUpperCase (sCountryCode.charAt (0)) &&
-      Character.isUpperCase (sCountryCode.charAt (1));
+           sCountryCode.length () == 2 &&
+           Character.isUpperCase (sCountryCode.charAt (0)) &&
+           Character.isUpperCase (sCountryCode.charAt (1));
   }
 
   /**

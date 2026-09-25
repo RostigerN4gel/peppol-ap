@@ -65,8 +65,7 @@ public class PeppolReportingController
                    @ApiResponse (responseCode = "401",
                                  description = "Missing or invalid API token",
                                  content = @Content),
-                   @ApiResponse (responseCode = "500",
-                                 description = "Failed to read Peppol Reporting backend data") })
+                   @ApiResponse (responseCode = "500", description = "Failed to read Peppol Reporting backend data") })
   public ResponseEntity <String> createPeppolReportingTSR (@Parameter (description = "Calendar year. Must be >= 2024.",
                                                                        required = true,
                                                                        example = "2026") @PathVariable (name = "year",
@@ -99,8 +98,7 @@ public class PeppolReportingController
                    @ApiResponse (responseCode = "401",
                                  description = "Missing or invalid API token",
                                  content = @Content),
-                   @ApiResponse (responseCode = "500",
-                                 description = "Failed to read Peppol Reporting backend data") })
+                   @ApiResponse (responseCode = "500", description = "Failed to read Peppol Reporting backend data") })
   public ResponseEntity <String> createPeppolReportingEUSR (@Parameter (description = "Calendar year. Must be >= 2024.",
                                                                         required = true,
                                                                         example = "2026") @PathVariable (name = "year",

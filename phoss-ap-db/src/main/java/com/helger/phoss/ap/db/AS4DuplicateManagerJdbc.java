@@ -134,7 +134,7 @@ public class AS4DuplicateManagerJdbc extends AbstractAPJdbcManager implements IA
 
     final DBExecutor aExecutor = newExecutor ();
     final MutableBoolean aIsDup = new MutableBoolean (false);
-    if (aExecutor.performInTransaction ( () -> {
+    if (aExecutor.performInTransaction (() -> {
       // Check first; the PK constraint serves as a backstop for races
       final long nExisting = aExecutor.queryCount ("SELECT COUNT(*) FROM " + m_sTableName + " WHERE message_id=?",
                                                    new ConstantPreparedStatementDataProvider (sMessageID));
@@ -197,7 +197,7 @@ public class AS4DuplicateManagerJdbc extends AbstractAPJdbcManager implements IA
 
     final ICommonsList <String> aEvictedIDs = new CommonsArrayList <> ();
     final DBExecutor aExecutor = newExecutor ();
-    aExecutor.performInTransaction ( () -> {
+    aExecutor.performInTransaction (() -> {
       final ICommonsList <DBResultRow> aRows = aExecutor.queryAll ("SELECT message_id FROM " +
                                                                    m_sTableName +
                                                                    " WHERE created_dt < ?",

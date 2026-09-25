@@ -1,0 +1,5 @@
+# The OpenTelemetry SDK must be installed before the first bean is created, because the first
+# GlobalOpenTelemetry.get () of a JVM installs the no-op instance as the global one and every
+# later GlobalOpenTelemetry.set (...) then fails. See issue #102.
+org.springframework.context.ApplicationContextInitializer=\
+com.helger.phoss.ap.webapp.otel.OtelBootstrapInitializer
