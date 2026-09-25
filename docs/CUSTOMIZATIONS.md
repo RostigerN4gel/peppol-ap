@@ -15,6 +15,11 @@ webservice. The forwarding is plugged into phoss-ap's `IDocumentForwarderProvide
 | `phoss-ap-webapp/.../webapp/middleware/MiddlewareReceiverForwarderProvider.java` | **new** | `IDocumentForwarderProviderSPI` with ID `middleware-data`. |
 | `phoss-ap-webapp/.../resources/META-INF/services/com.helger.phoss.ap.api.spi.IDocumentForwarderProviderSPI` | **new** | Registers the provider for `ServiceLoader`. |
 | `phoss-ap-webapp/.../resources/application.properties` | **patched** | Forwarding section switched to `mode=spi`, `spi.id=middleware-data`. |
+| `phoss-ap-webapp/.../webapp/forwarding/AS4RejectingHttpForwarder.java` + `…Provider.java` | **new** | SPI forwarder `http-sync-as4-reject`: the built-in `http_post_sync` forwarder, but an HTTP error status is rejected via AS4. See [AS4 rejection on HTTP error](#as4-rejection-on-http-error-fork-specific). |
+| `phoss-ap-core/.../core/inbound/IAS4RejectingDocumentForwarder.java` | **new** | Optional forwarder interface to request an AS4 rejection of a failed synchronous forwarding. |
+| `phoss-ap-core/.../core/inbound/InboundOrchestrator.java` | **patched** | `forwardDocument` overload with an AS4-rejection out-parameter; the synchronous path turns it into an EBMS error. |
+| `phoss-ap-api/.../api/codelist/EInboundStatus.java` | **patched** | New final status `as4_rejected`. |
+| `phoss-ap-db/.../db/InboundTransactionManagerJdbc.java` | **patched** | Duplicate detection ignores `as4_rejected`; lookups by AS4/SBDH ID prefer the retransmission. |
 
 ## Why a custom SPI forwarder (vs. the built-in HTTP forwarder)
 
@@ -143,6 +148,50 @@ through this AP. This is a valid Peppol MLS response code, not a failure.
 `mls.sending.enabled=false` plus a ~130-line reimplementation of `MlsHandler`, which was rejected as
 a maintenance risk. This one-line change is the cheap part of that feature request and deliberately
 does not work around the missing hook.
+
+## AS4 rejection on HTTP error (fork-specific)
+
+Addresses [FR-004](feature-requests/FR-004-as4-rejection-when-mls-undeliverable.md) in its simplest
+form (the `always` variant, without an MLS probe). Upstream answers C2 with an AS4 Receipt in every
+case and reports forwarding failures only via MLS; if that MLS is undeliverable, the outcome is lost.
+
+```properties
+forwarding.mode=spi
+forwarding.spi.id=http-sync-as4-reject
+# everything else exactly as for http_post_sync
+forwarding.http.endpoint=http://your-host/forwarding/url/sync
+```
+
+`AS4RejectingHttpForwarder` delegates everything to the unchanged upstream `HttpDocumentForwarder`
+in `http_post_sync` mode (same config keys, request, JSON response contract). The only difference:
+
+| Middleware answer on the **first, synchronous** attempt | Upstream `http_post_sync` | `http-sync-as4-reject` |
+|---|---|---|
+| 2xx | Receipt, forwarded | same |
+| 2xx with `{"retry":"none"}` | Receipt, `permanently_failed`, MLS `AB` | same |
+| IO error / timeout / no JSON | Receipt, retry per `retry.forwarding.*` | same |
+| **HTTP status ≥ 300** | Receipt, retry per `retry.forwarding.*` | **EBMS error** (`EBMS_OTHER`, generic text), status `as4_rejected`, no retry, no MLS |
+| **Circuit breaker open** (no call made) | Receipt, retry after `retry.forwarding.initial-backoff` | **EBMS error**, as above |
+
+Details:
+
+* C2 gets the generic error detail *"Forwarding to the receiver backend failed - please retry
+  later"*; the actual HTTP error stays in the log and in the transaction's `error_details`.
+* `as4_rejected` transactions (and their stored payload) are kept for audit, but ignored by the
+  duplicate detection, so a retransmission of the same SBDH instance / AS4 message is processed as a
+  first delivery. REST lookups by SBDH instance ID then return the retransmission.
+* Only the synchronous first attempt can reject via AS4 — once a retry is scheduled (not the case
+  for an HTTP error with this forwarder), the Receipt has already been sent.
+* Not applied to a document that already got a negative MLS (`RE`) from the inbound verification
+  (`EVerificationRejectionForwarding`), so C2 never gets two contradicting answers.
+* The circuit breaker opens after `circuit-breaker.failure-threshold` consecutive failures (HTTP
+  errors count). While it is open no HTTP call is made; with this forwarder the message is then
+  rejected via AS4 as well, with the same error text, instead of being accepted for a later retry.
+  IO errors and timeouts also open the circuit breaker, so during an outage of that kind all messages
+  are rejected via AS4 after the threshold is reached.
+* `as4_rejected` rows are not archived (`getAllForArchival` only picks upstream final states).
+* This deliberately deviates from the Peppol AS4 profile, which expects failures behind C3 to be
+  reported via MLS only.
 
 ## Build
 

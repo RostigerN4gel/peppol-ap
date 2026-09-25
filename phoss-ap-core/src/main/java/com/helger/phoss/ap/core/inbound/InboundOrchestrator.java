@@ -1281,12 +1281,18 @@ public final class InboundOrchestrator
         }
 
         // Forward - Business Document and MLS
-        if (forwardDocument (sLogPrefix, aVerifiedTx).isFailure ())
+        // FORK: the synchronous first attempt may request an AS4 rejection
+        final Wrapper <String> aAS4Rejection = new Wrapper <> ();
+        if (forwardDocument (sLogPrefix, aVerifiedTx, aAS4Rejection).isFailure ())
         {
           // Forwarding failed
 
           for (final var aHandler : APCoreMetaManager.getAllNotificationHandlers ())
             aHandler.onInboundForwardingError (sTxID, false);
+
+          // FORK: answer C2 with an EBMS error instead of a Receipt. The details stay internal
+          if (aAS4Rejection.get () != null)
+            aProcessingErrors.add ("Forwarding to the receiver backend failed - please retry later");
         }
         else
         {
@@ -1318,6 +1324,54 @@ public final class InboundOrchestrator
   @NonNull
   public static ESuccess forwardDocument (@NonNull final String sLogPrefix,
                                           @NonNull final IInboundTransaction aInboundTx)
+  {
+    return forwardDocument (sLogPrefix, aInboundTx, null);
+  }
+
+  /**
+   * FORK: Mark the transaction as rejected via AS4 - no retry, no MLS - and remember the reason for
+   * the caller, which turns it into an EBMS error.
+   */
+  private static void _rejectViaAS4 (@NonNull final String sLogPrefix,
+                                     @NonNull final IInboundTransaction aInboundTx,
+                                     final int nAttemptCount,
+                                     @NonNull final String sReason,
+                                     @NonNull final Wrapper <String> aAS4Rejection)
+  {
+    LOGGER.warn (sLogPrefix +
+                 "Forwarding failed for transaction '" +
+                 aInboundTx.getID () +
+                 "' - rejecting it via AS4: " +
+                 sReason);
+    APJdbcMetaManager.getInboundTransactionMgr ()
+                     .updateStatusAndRetry (aInboundTx.getID (),
+                                            EInboundStatus.AS4_REJECTED,
+                                            nAttemptCount,
+                                            null,
+                                            "Rejected via AS4: " + sReason);
+    aAS4Rejection.set (sReason);
+  }
+
+  /**
+   * FORK: Same as {@link #forwardDocument(String, IInboundTransaction)}, but allows a forwarder
+   * implementing {@link IAS4RejectingDocumentForwarder} to reject the failed forwarding on the AS4
+   * level. Must only be used for the synchronous first attempt, while C2 still waits for the AS4
+   * response.
+   *
+   * @param sLogPrefix
+   *        Log message prefix for traceability. May not be <code>null</code>.
+   * @param aInboundTx
+   *        The inbound transaction to forward. May not be <code>null</code>.
+   * @param aAS4Rejection
+   *        If not <code>null</code>, an AS4 rejection is allowed and the error details are stored in
+   *        here if it happened. In that case the transaction is set to
+   *        {@link EInboundStatus#AS4_REJECTED} without a retry and without an MLS.
+   * @return {@link ESuccess#SUCCESS} if forwarding succeeded, {@link ESuccess#FAILURE} otherwise.
+   */
+  @NonNull
+  public static ESuccess forwardDocument (@NonNull final String sLogPrefix,
+                                          @NonNull final IInboundTransaction aInboundTx,
+                                          @Nullable final Wrapper <String> aAS4Rejection)
   {
     final IInboundTransactionManager aTxMgr = APJdbcMetaManager.getInboundTransactionMgr ();
     final IInboundForwardingAttemptManager aAttemptMgr = APJdbcMetaManager.getInboundForwardingAttemptMgr ();
@@ -1477,6 +1531,23 @@ public final class InboundOrchestrator
             aAttemptMgr.createFailure (aInboundTx.getID (), aResult.getErrorCode (), aResult.getErrorDetails ());
 
             final int nNewAttemptCount = aInboundTx.getAttemptCount () + 1;
+
+            // FORK: reject via AS4 instead of retry/MLS, if the forwarder requests it. Not for a
+            // document that was already answered with a negative MLS (RE) by the verification -
+            // C2 must not get two contradicting answers
+            if (aAS4Rejection != null &&
+                aForwarder instanceof final IAS4RejectingDocumentForwarder aRejectingForwarder &&
+                aRejectingForwarder.isRejectViaAS4 (aResult) &&
+                !isMlsSuppressedAfterRejection (aInboundTx))
+            {
+              _rejectViaAS4 (sLogPrefix,
+                             aInboundTx,
+                             nNewAttemptCount,
+                             StringHelper.getNotNull (aResult.getErrorDetails (), aResult.getErrorCode ()),
+                             aAS4Rejection);
+              return ESuccess.FAILURE;
+            }
+
             final int nMaxRetryAttempts = APCoreConfig.getRetryForwardingMaxAttempts ();
             if (!aResult.isRetryAllowed () || nNewAttemptCount >= nMaxRetryAttempts)
             {
@@ -1530,6 +1601,17 @@ public final class InboundOrchestrator
                                                          .plus (APCoreConfig.getRetryForwardingInitialBackoff ());
           final String sRejectionMsg = CircuitBreakerManager.getRejectionMessage (sCircuitBreakerID,
                                                                                   "Document forwarding");
+
+          // FORK: the backend is known to be failing - a forwarder rejecting via AS4 rejects right
+          // away instead of accepting the document for a later retry
+          if (aAS4Rejection != null &&
+              APCoreMetaManager.getForwarder () instanceof IAS4RejectingDocumentForwarder &&
+              !isMlsSuppressedAfterRejection (aInboundTx))
+          {
+            _rejectViaAS4 (sLogPrefix, aInboundTx, aInboundTx.getAttemptCount (), sRejectionMsg, aAS4Rejection);
+            return ESuccess.FAILURE;
+          }
+
           LOGGER.warn (sLogPrefix +
                        sRejectionMsg +
                        " - not forwarding transaction '" +

@@ -689,6 +689,61 @@ public final class JdbcManagerIntegrationTest
     assertEquals (sSbdhID, aTx.getSbdhInstanceID ());
   }
 
+  @NonNull
+  private static String _createInbound (@NonNull final String sAS4MsgID, @NonNull final String sSbdhID)
+  {
+    return APJdbcMetaManager.getInboundTransactionMgr ()
+                            .create (_uniqueID (),
+                                     "POP000001",
+                                     "POP000002",
+                                     "CN=TestCert",
+                                     "iso6523-actorid-upis::9915:sender",
+                                     "iso6523-actorid-upis::9915:receiver",
+                                     "busdox-docid-qns::urn:test:invoice",
+                                     "cenbii-procid-ubl::urn:test:process",
+                                     "/tmp/test.sbd",
+                                     100L,
+                                     "hash-as4-rejected",
+                                     sAS4MsgID,
+                                     _now (),
+                                     sSbdhID,
+                                     "DE",
+                                     false,
+                                     false,
+                                     null,
+                                     EPeppolMLSType.ALWAYS_SEND);
+  }
+
+  /**
+   * FORK: a transaction rejected via AS4 must not block the retransmission of the same document.
+   */
+  @Test
+  public void testInboundAS4RejectedIsSuperseded ()
+  {
+    final IInboundTransactionManager aMgr = APJdbcMetaManager.getInboundTransactionMgr ();
+    final String sAS4MsgID = _uniqueID ();
+    final String sSbdhID = _uniqueID ();
+
+    final String sRejectedID = _createInbound (sAS4MsgID, sSbdhID);
+    assertTrue (aMgr.containsBySbdhInstanceID (sSbdhID));
+    assertTrue (aMgr.containsByAS4MessageID (sAS4MsgID));
+
+    aMgr.updateStatusAndRetry (sRejectedID, EInboundStatus.AS4_REJECTED, 1, null, "Rejected via AS4: test");
+    // Ignored by the duplicate detection
+    assertFalse (aMgr.containsBySbdhInstanceID (sSbdhID));
+    assertFalse (aMgr.containsByAS4MessageID (sAS4MsgID));
+    // But still found, as long as it is the only one
+    assertEquals (sRejectedID, aMgr.getBySbdhInstanceID (sSbdhID).getID ());
+    assertEquals (sRejectedID, aMgr.getByAS4MessageID (sAS4MsgID).getID ());
+
+    // The retransmission wins the lookup
+    final String sRetransmittedID = _createInbound (sAS4MsgID, sSbdhID);
+    assertTrue (aMgr.containsBySbdhInstanceID (sSbdhID));
+    assertTrue (aMgr.containsByAS4MessageID (sAS4MsgID));
+    assertEquals (sRetransmittedID, aMgr.getBySbdhInstanceID (sSbdhID).getID ());
+    assertEquals (sRetransmittedID, aMgr.getByAS4MessageID (sAS4MsgID).getID ());
+  }
+
   @Test
   public void testInboundContainsBySbdhInstanceID ()
   {

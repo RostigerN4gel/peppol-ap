@@ -69,7 +69,8 @@ public class InboundTransactionResponse
                                "forwarding",
                                "forwarded",
                                "forward_failed",
-                               "permanently_failed" })
+                               "permanently_failed",
+                               "as4_rejected" })
   private String status;
 
   @Schema (description = "Total number of forwarding attempts")

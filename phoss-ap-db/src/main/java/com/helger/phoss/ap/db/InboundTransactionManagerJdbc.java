@@ -177,14 +177,41 @@ public class InboundTransactionManagerJdbc extends AbstractAPJdbcManager impleme
     return nAffectedRows > 0;
   }
 
+  /**
+   * FORK: Select the one relevant transaction out of several rows matching the same identifier. A
+   * transaction with status {@link EInboundStatus#AS4_REJECTED} was answered with an AS4 error and is
+   * superseded by the retransmission of the same document, so it is only returned if nothing else
+   * matches - the most recent one in that case.
+   *
+   * @param aRows
+   *        The matching rows, ordered by <code>received_dt</code>. May not be <code>null</code>.
+   * @return <code>null</code> if no single relevant transaction can be determined.
+   */
+  @Nullable
+  private static IInboundTransaction _getSingleRelevant (@NonNull final ICommonsList <DBResultRow> aRows)
+  {
+    final ICommonsList <IInboundTransaction> aAll = aRows.getAllMapped (InboundTransactionRow::new);
+    if (aAll.size () == 1)
+      return aAll.getFirstOrNull ();
+
+    final ICommonsList <IInboundTransaction> aNotRejected = aAll.getAll (x -> x.getStatus () !=
+                                                                             EInboundStatus.AS4_REJECTED);
+    if (aNotRejected.size () == 1)
+      return aNotRejected.getFirstOrNull ();
+    if (aNotRejected.isEmpty ())
+      return aAll.getLastOrNull ();
+    return null;
+  }
+
   /** {@inheritDoc} */
   public boolean containsByAS4MessageID (@NonNull final String sAS4MessageID)
   {
     final long nAffectedRows = newExecutor ().queryCount ("SELECT COUNT(*)" +
                                                           " FROM " +
                                                           m_sTableName +
-                                                          " WHERE as4_message_id=?",
-                                                          new ConstantPreparedStatementDataProvider (sAS4MessageID));
+                                                          " WHERE as4_message_id=? AND status<>?",
+                                                          new ConstantPreparedStatementDataProvider (sAS4MessageID,
+                                                                                                     EInboundStatus.AS4_REJECTED.getID ()));
     return nAffectedRows > 0;
   }
 
@@ -196,12 +223,14 @@ public class InboundTransactionManagerJdbc extends AbstractAPJdbcManager impleme
                                                                       COLS +
                                                                       " FROM " +
                                                                       m_sTableName +
-                                                                      " WHERE as4_message_id=?",
+                                                                      " WHERE as4_message_id=? ORDER BY received_dt",
                                                                       new ConstantPreparedStatementDataProvider (sAS4MessageID));
     if (aRows != null)
     {
-      if (aRows.size () == 1)
-        return new InboundTransactionRow (aRows.getFirstOrNull ());
+      // FORK: a transaction rejected via AS4 is superseded by the retransmission
+      final IInboundTransaction aTx = _getSingleRelevant (aRows);
+      if (aTx != null)
+        return aTx;
       LOGGER.warn ("Found " +
                    aRows.size () +
                    " transactions that all match the AS4 Message ID '" +
@@ -217,8 +246,9 @@ public class InboundTransactionManagerJdbc extends AbstractAPJdbcManager impleme
     final long nAffectedRows = newExecutor ().queryCount ("SELECT COUNT(*)" +
                                                           " FROM " +
                                                           m_sTableName +
-                                                          " WHERE sbdh_instance_id=?",
-                                                          new ConstantPreparedStatementDataProvider (sSbdhInstanceID));
+                                                          " WHERE sbdh_instance_id=? AND status<>?",
+                                                          new ConstantPreparedStatementDataProvider (sSbdhInstanceID,
+                                                                                                     EInboundStatus.AS4_REJECTED.getID ()));
     return nAffectedRows > 0;
   }
 
@@ -230,12 +260,14 @@ public class InboundTransactionManagerJdbc extends AbstractAPJdbcManager impleme
                                                                       COLS +
                                                                       " FROM " +
                                                                       m_sTableName +
-                                                                      " WHERE sbdh_instance_id=?",
+                                                                      " WHERE sbdh_instance_id=? ORDER BY received_dt",
                                                                       new ConstantPreparedStatementDataProvider (sSbdhInstanceID));
     if (aRows != null)
     {
-      if (aRows.size () == 1)
-        return new InboundTransactionRow (aRows.getFirstOrNull ());
+      // FORK: a transaction rejected via AS4 is superseded by the retransmission
+      final IInboundTransaction aTx = _getSingleRelevant (aRows);
+      if (aTx != null)
+        return aTx;
       LOGGER.warn ("Found " +
                    aRows.size () +
                    " transactions that all match the SBDH Instance Identifier '" +

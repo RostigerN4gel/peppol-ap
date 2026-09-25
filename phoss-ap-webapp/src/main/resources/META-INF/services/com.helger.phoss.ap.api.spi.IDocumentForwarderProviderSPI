@@ -1,1 +1,2 @@
 com.helger.phoss.ap.webapp.middleware.MiddlewareReceiverForwarderProvider
+com.helger.phoss.ap.webapp.forwarding.AS4RejectingHttpForwarderProvider

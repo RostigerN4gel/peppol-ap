@@ -50,7 +50,13 @@ public enum EInboundStatus implements IHasID <String>
   /** Last forwarding attempt failed &mdash; scheduled for retry. */
   FORWARD_FAILED ("forward_failed"),
   /** Max retries exhausted &mdash; no further attempts. */
-  PERMANENTLY_FAILED ("permanently_failed");
+  PERMANENTLY_FAILED ("permanently_failed"),
+  /**
+   * FORK: The synchronous forwarding failed and C2 was answered with an AS4/EBMS error instead of a
+   * Receipt &mdash; no retry, no MLS. Ignored by the duplicate detection, so that a retransmission
+   * by C2 is processed like a first delivery.
+   */
+  AS4_REJECTED ("as4_rejected");
 
   private final String m_sID;
 
@@ -73,7 +79,7 @@ public enum EInboundStatus implements IHasID <String>
    */
   public boolean isFinalState ()
   {
-    return this == REJECTED || this == FORWARDED || this == PERMANENTLY_FAILED;
+    return this == REJECTED || this == FORWARDED || this == PERMANENTLY_FAILED || this == AS4_REJECTED;
   }
 
   /**

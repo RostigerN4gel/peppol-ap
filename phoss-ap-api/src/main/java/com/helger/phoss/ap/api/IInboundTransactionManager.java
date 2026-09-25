@@ -123,7 +123,9 @@ public interface IInboundTransactionManager
   boolean containsTransactionWithID (@NonNull String sID);
 
   /**
-   * Check if a transaction with the provided AS4 Message ID exists.
+   * Check if a transaction with the provided AS4 Message ID exists. FORK: Transactions with status
+   * {@link com.helger.phoss.ap.api.codelist.EInboundStatus#AS4_REJECTED} are ignored, because C2 is
+   * expected to retransmit them.
    *
    * @param sAS4MessageID
    *        The AS4 Message ID. Never <code>null</code>.
@@ -142,7 +144,9 @@ public interface IInboundTransactionManager
   IInboundTransaction getByAS4MessageID (@NonNull String sAS4MessageID);
 
   /**
-   * Check if a transaction with the provided SBDH Instance Identifier exists.
+   * Check if a transaction with the provided SBDH Instance Identifier exists. FORK: Transactions with
+   * status {@link com.helger.phoss.ap.api.codelist.EInboundStatus#AS4_REJECTED} are ignored, because
+   * C2 is expected to retransmit them.
    *
    * @param sSbdhInstanceID
    *        The SBDH Instance Identifier. Never <code>null</code>.
