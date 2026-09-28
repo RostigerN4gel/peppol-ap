@@ -1290,9 +1290,9 @@ public final class InboundOrchestrator
           for (final var aHandler : APCoreMetaManager.getAllNotificationHandlers ())
             aHandler.onInboundForwardingError (sTxID, false);
 
-          // FORK: answer C2 with an EBMS error instead of a Receipt. The details stay internal
+          // FORK: answer C2 with an EBMS error instead of a Receipt
           if (aAS4Rejection.get () != null)
-            aProcessingErrors.add ("Forwarding to the receiver backend failed - please retry later");
+            aProcessingErrors.add (aAS4Rejection.get ());
         }
         else
         {
@@ -1329,19 +1329,24 @@ public final class InboundOrchestrator
   }
 
   /**
-   * FORK: Mark the transaction as rejected via AS4 - no retry, no MLS - and remember the reason for
-   * the caller, which turns it into an EBMS error.
+   * FORK: Mark the transaction as rejected via AS4 - no retry, no MLS - and remember the error
+   * detail for C2, which the caller turns into an EBMS error.
    */
   private static void _rejectViaAS4 (@NonNull final String sLogPrefix,
                                      @NonNull final IInboundTransaction aInboundTx,
                                      final int nAttemptCount,
                                      @NonNull final String sReason,
+                                     @Nullable final String sAS4ErrorDetail,
                                      @NonNull final Wrapper <String> aAS4Rejection)
   {
+    final String sDetailForC2 = StringHelper.isNotEmpty (sAS4ErrorDetail) ? sAS4ErrorDetail
+                                                                          : IAS4RejectingDocumentForwarder.DEFAULT_AS4_ERROR_DETAIL;
     LOGGER.warn (sLogPrefix +
                  "Forwarding failed for transaction '" +
                  aInboundTx.getID () +
-                 "' - rejecting it via AS4: " +
+                 "' - rejecting it via AS4 with '" +
+                 sDetailForC2 +
+                 "': " +
                  sReason);
     APJdbcMetaManager.getInboundTransactionMgr ()
                      .updateStatusAndRetry (aInboundTx.getID (),
@@ -1349,7 +1354,7 @@ public final class InboundOrchestrator
                                             nAttemptCount,
                                             null,
                                             "Rejected via AS4: " + sReason);
-    aAS4Rejection.set (sReason);
+    aAS4Rejection.set (sDetailForC2);
   }
 
   /**
@@ -1363,8 +1368,8 @@ public final class InboundOrchestrator
    * @param aInboundTx
    *        The inbound transaction to forward. May not be <code>null</code>.
    * @param aAS4Rejection
-   *        If not <code>null</code>, an AS4 rejection is allowed and the error details are stored in
-   *        here if it happened. In that case the transaction is set to
+   *        If not <code>null</code>, an AS4 rejection is allowed and the error detail for C2 is
+   *        stored in here if it happened. In that case the transaction is set to
    *        {@link EInboundStatus#AS4_REJECTED} without a retry and without an MLS.
    * @return {@link ESuccess#SUCCESS} if forwarding succeeded, {@link ESuccess#FAILURE} otherwise.
    */
@@ -1544,6 +1549,7 @@ public final class InboundOrchestrator
                              aInboundTx,
                              nNewAttemptCount,
                              StringHelper.getNotNull (aResult.getErrorDetails (), aResult.getErrorCode ()),
+                             aRejectingForwarder.getAS4ErrorDetail (aResult),
                              aAS4Rejection);
               return ESuccess.FAILURE;
             }
@@ -1608,7 +1614,7 @@ public final class InboundOrchestrator
               APCoreMetaManager.getForwarder () instanceof IAS4RejectingDocumentForwarder &&
               !isMlsSuppressedAfterRejection (aInboundTx))
           {
-            _rejectViaAS4 (sLogPrefix, aInboundTx, aInboundTx.getAttemptCount (), sRejectionMsg, aAS4Rejection);
+            _rejectViaAS4 (sLogPrefix, aInboundTx, aInboundTx.getAttemptCount (), sRejectionMsg, null, aAS4Rejection);
             return ESuccess.FAILURE;
           }
 

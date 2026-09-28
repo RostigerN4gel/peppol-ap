@@ -18,8 +18,13 @@ package com.helger.phoss.ap.webapp.forwarding;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.nio.charset.StandardCharsets;
+
+import org.apache.hc.core5.http.message.BasicClassicHttpResponse;
+import org.apache.hc.core5.http.message.StatusLine;
 import org.junit.jupiter.api.Test;
 
 import com.helger.base.state.ESuccess;
@@ -29,6 +34,7 @@ import com.helger.config.ConfigFactory;
 import com.helger.config.fallback.ConfigWithFallback;
 import com.helger.config.source.MultiConfigurationValueProvider;
 import com.helger.config.source.appl.ConfigurationSourceFunction;
+import com.helger.httpclient.response.ExtendedHttpResponseException;
 import com.helger.phoss.ap.api.model.ForwardingResult;
 
 /**
@@ -53,6 +59,46 @@ final class AS4RejectingHttpForwarderTest
     assertFalse (aForwarder.isRejectViaAS4 (ForwardingResult.failure ("http_io_error", "Connection refused")));
     assertFalse (aForwarder.isRejectViaAS4 (ForwardingResult.failure ("http_response_error", "No JSON")));
     assertFalse (aForwarder.isRejectViaAS4 (ForwardingResult.failure ("http_error", "Something")));
+  }
+
+  /**
+   * The error details exactly as {@link com.helger.phoss.ap.forwarding.http.HttpDocumentForwarder}
+   * creates them for an HTTP error status.
+   */
+  private static ForwardingResult _httpStatusFailure (final int nStatus, final String sBody)
+  {
+    final BasicClassicHttpResponse aResponse = new BasicClassicHttpResponse (nStatus, "Server Error");
+    aResponse.addHeader ("Content-Type", "application/json");
+    final ExtendedHttpResponseException ex = new ExtendedHttpResponseException (new StatusLine (aResponse),
+                                                                                aResponse,
+                                                                                sBody == null ? null
+                                                                                              : sBody.getBytes (StandardCharsets.UTF_8),
+                                                                                StandardCharsets.UTF_8);
+    return ForwardingResult.failure ("http_status", ex.getMessage ());
+  }
+
+  @Test
+  void testAS4ErrorDetailFromBackend ()
+  {
+    final AS4RejectingHttpForwarder aForwarder = new AS4RejectingHttpForwarder ();
+
+    // The Middleware's error body
+    ForwardingResult aResult = _httpStatusFailure (500,
+                                                   "{\"retry\":\"none\",\"errorMessage\":\"An error occurred while trying to process the request.\"}");
+    assertTrue (aForwarder.isRejectViaAS4 (aResult));
+    assertEquals ("An error occurred while trying to process the request.", aForwarder.getAS4ErrorDetail (aResult));
+
+    // No errorMessage, no JSON, no body -> generic default
+    assertNull (aForwarder.getAS4ErrorDetail (_httpStatusFailure (500, "{\"retry\":\"none\"}")));
+    assertNull (aForwarder.getAS4ErrorDetail (_httpStatusFailure (502, "<html>Bad Gateway</html>")));
+    assertNull (aForwarder.getAS4ErrorDetail (_httpStatusFailure (503, null)));
+    assertNull (aForwarder.getAS4ErrorDetail (_httpStatusFailure (500, "{\"errorMessage\":\"  \"}")));
+    assertNull (aForwarder.getAS4ErrorDetail (ForwardingResult.failure ("http_status", null)));
+
+    // Truncated
+    aResult = _httpStatusFailure (500, "{\"errorMessage\":\"" + "x".repeat (2000) + "\"}");
+    assertEquals (AS4RejectingHttpForwarder.MAX_AS4_ERROR_DETAIL_LENGTH,
+                  aForwarder.getAS4ErrorDetail (aResult).length ());
   }
 
   @Test

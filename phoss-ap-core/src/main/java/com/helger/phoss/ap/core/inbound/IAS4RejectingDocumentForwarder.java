@@ -17,6 +17,7 @@
 package com.helger.phoss.ap.core.inbound;
 
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import com.helger.phoss.ap.api.model.ForwardingResult;
 
@@ -53,4 +54,23 @@ public interface IAS4RejectingDocumentForwarder
    *         default handling (Receipt, retry or MLS).
    */
   boolean isRejectViaAS4 (@NonNull ForwardingResult aResult);
+
+  /**
+   * Get the error detail text that is sent to C2 in the EBMS error, if
+   * {@link #isRejectViaAS4(ForwardingResult)} returned <code>true</code>. Note that this text leaves
+   * the AP - it must not contain internal details.
+   *
+   * @param aResult
+   *        The failed forwarding result, as returned by this forwarder. Never <code>null</code>.
+   * @return The text for C2, or <code>null</code> to use the generic
+   *         {@link #DEFAULT_AS4_ERROR_DETAIL}.
+   */
+  @Nullable
+  default String getAS4ErrorDetail (@NonNull final ForwardingResult aResult)
+  {
+    return null;
+  }
+
+  /** The error detail sent to C2 if the forwarder provides none. */
+  String DEFAULT_AS4_ERROR_DETAIL = "Forwarding to the receiver backend failed - please retry later";
 }

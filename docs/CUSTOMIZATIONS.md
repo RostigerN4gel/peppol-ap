@@ -170,13 +170,17 @@ in `http_post_sync` mode (same config keys, request, JSON response contract). Th
 | 2xx | Receipt, forwarded | same |
 | 2xx with `{"retry":"none"}` | Receipt, `permanently_failed`, MLS `AB` | same |
 | IO error / timeout / no JSON | Receipt, retry per `retry.forwarding.*` | same |
-| **HTTP status ≥ 300** | Receipt, retry per `retry.forwarding.*` | **EBMS error** (`EBMS_OTHER`, generic text), status `as4_rejected`, no retry, no MLS |
+| **HTTP status ≥ 300** | Receipt, retry per `retry.forwarding.*` | **EBMS error** (`EBMS_OTHER`, backend `errorMessage`), status `as4_rejected`, no retry, no MLS |
 | **Circuit breaker open** (no call made) | Receipt, retry after `retry.forwarding.initial-backoff` | **EBMS error**, as above |
 
 Details:
 
-* C2 gets the generic error detail *"Forwarding to the receiver backend failed - please retry
-  later"*; the actual HTTP error stays in the log and in the transaction's `error_details`.
+* The EBMS error detail sent to C2 is the `errorMessage` of the backend's JSON error body
+  (`{"retry":"none","errorMessage":"..."}`, trimmed, at most 512 characters). **This text leaves
+  the AP** — the backend must not put internal details into it. Without a usable `errorMessage`
+  (no JSON, no body, open circuit breaker) C2 gets the generic *"Forwarding to the receiver backend
+  failed - please retry later"*. The full HTTP error (status line, headers, body) stays in the log
+  and in the transaction's `error_details`.
 * `as4_rejected` transactions (and their stored payload) are kept for audit, but ignored by the
   duplicate detection, so a retransmission of the same SBDH instance / AS4 message is processed as a
   first delivery. REST lookups by SBDH instance ID then return the retransmission.
