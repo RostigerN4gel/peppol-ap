@@ -26,7 +26,7 @@ This page describes how to **operate** and **troubleshoot** the Peppol Access Po
 | Stored documents                    | `/opt/peppol-ap/generated/inbound/` and `.../outbound/`                                                                       |
 | AS4 endpoint                        | `https://Middlewareserver/as4` (port 443)                                                                                     |
 | SMP                                 | `https://smp-server.de                                                                                                        |
-| Peppol stage / Seat ID              | `test` / `PDE000765`                                                                                                          |
+| Peppol stage / Seat ID              | `test` / `PDE...`                                                                                                          |
 | Database                            | PostgreSQL (AWS RDS), schemas `phossdev-ap`, `phossdev-reporting`, `phossdev-report` – schema migration via Flyway at startup |
 | Forwarding to the middleware        | `forwarding.mode=http_post_sync` (see chapter 4)                                                                              |
 
@@ -176,7 +176,7 @@ phossap.flyway.jdbc.schema-create=true
 
 # --- Peppol identity ---
 peppol.stage=test
-peppol.owner.seatid=PDE000765
+peppol.owner.seatid=PDE....
 peppol.owner.countrycode=DE
 
 # --- API security (header X-Token for /api/**) ---
@@ -308,7 +308,7 @@ The most important keys, grouped by topic. "Default" is the value phoss-ap uses 
 | Key | Default | Dev | Meaning |
 | --- | --- | --- | --- |
 | `peppol.stage` | `test` | `test` | `test` or `prod` – must match certificate, truststores and SML |
-| `peppol.owner.seatid` | example | `PDE000765` | own Peppol Seat ID (`P[OA]P` + 6 digits); must match the certificate |
+| `peppol.owner.seatid` | example | `PDE...` | own Peppol Seat ID (`P[OA]P` + 6 digits); must match the certificate |
 | `peppol.owner.countrycode` | example | `DE` | country of the AP operator (reporting) |
 | `phase4.endpoint.address` | – | `https://dev-as4-…/as4` | public AS4 URL of this AP, as registered in the SMP |
 | `org.apache.wss4j.crypto.merlin.keystore.*` | example keystore | AP keystore | Peppol AP certificate and private key (`type`, `file`, `password`, `alias`, `private.password`) |
@@ -940,7 +940,7 @@ zgrep -n '<sbdhInstanceID>' phoss-ap.log.2026-*.gz            # older days
 | `UnsupportedClassVersionError ... class file version 65.0` | jar started with Java 17 | the service uses `/opt/peppol-ap/jdk` (JDK 21); start manually only with this JDK |
 | Service fails with `Exec format error` / `no such file` on the JDK path | `/opt/peppol-ap/jdk` deleted while the unit still points at it | re-run the install script |
 | `Failed to load configured AS4 Key store` / `private key with the alias` | keystore path, type, password or alias wrong | check `org.apache.wss4j.crypto.merlin.keystore.*`, `keytool -list -keystore <file> -storetype pkcs12` |
-| `The configured Peppol Seat ID '...' does not match the syntactial requirements` | wrong format of `peppol.owner.seatid` | `P[OA]P` + 6 digits, e.g. `PDE000765` |
+| `The configured Peppol Seat ID '...' does not match the syntactial requirements` | wrong format of `peppol.owner.seatid` | `P[OA]P` + 6 digits, e.g. `PDE....` |
 | `No active Spring profiles` in the log | `--spring.profiles.active=dev` missing | check the unit: `systemctl cat phoss-ap` |
 | `Port 443 was already in use` / permission denied on port 443 | another service on the port, or missing permission for a privileged port | find the owner with `ss -lntp`; check `server.port` |
 | Flyway error at startup after an update | new migrations of the new version, missing DB permissions | the DB user needs permission to create/alter objects in the schemas |
