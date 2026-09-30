@@ -27,7 +27,7 @@ This page describes how to **operate** and **troubleshoot** the Peppol Access Po
 | AS4 endpoint                        | `https://Middlewareserver/as4` (port 443)                                                                                     |
 | SMP                                 | `https://smp-server.de`                                                                                                        |
 | Peppol stage / Seat ID              | `test` / `PDE...`                                                                                                          |
-| Database                            | PostgreSQL (AWS RDS), schemas `phossdev-ap`, `phossdev-reporting`, `phossdev-report` – schema migration via Flyway at startup |
+| Database                            | PostgreSQL, schemas `phossdev-ap`, `phossdev-reporting`, `phossdev-report` – schema migration via Flyway at startup |
 | Forwarding to the middleware        | `forwarding.mode=http_post_sync` (see chapter 4)                                                                              |
 
 ---
