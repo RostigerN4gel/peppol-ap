@@ -25,7 +25,7 @@ This page describes how to **operate** and **troubleshoot** the Peppol Access Po
 | AS4 message dumps                   | `/opt/peppol-ap/generated/phase4-dumps/grouped/YYYY/MM/DD/<ID>/`                                                              |
 | Stored documents                    | `/opt/peppol-ap/generated/inbound/` and `.../outbound/`                                                                       |
 | AS4 endpoint                        | `https://Middlewareserver/as4` (port 443)                                                                                     |
-| SMP                                 | `https://smp-server.de                                                                                                        |
+| SMP                                 | `https://smp-server.de`                                                                                                        |
 | Peppol stage / Seat ID              | `test` / `PDE...`                                                                                                          |
 | Database                            | PostgreSQL (AWS RDS), schemas `phossdev-ap`, `phossdev-reporting`, `phossdev-report` – schema migration via Flyway at startup |
 | Forwarding to the middleware        | `forwarding.mode=http_post_sync` (see chapter 4)                                                                              |
