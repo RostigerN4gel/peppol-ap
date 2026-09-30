@@ -1,12 +1,10 @@
 # Phoss-ap – Operations and Troubleshooting
 
-> Exported from the Confluence page [Phoss-Ap](https://lobster-team.atlassian.net/wiki/spaces/datanetwork/pages/1242234882/Phoss-Ap) (space *Supply Chain Engineering*) on 2026-09-30. Confluence is the master copy - update the page there and re-export.
-
-This page describes how to **operate** and **troubleshoot** the Lobster Peppol Access Point based on **phoss-ap**. It is intended for everyone who deploys or monitors the AP or analyzes incidents.
+This page describes how to **operate** and **troubleshoot** the Peppol Access Point based on **phoss-ap**. It is intended for everyone who deploys or monitors the AP or analyzes incidents.
 
 - **Software:** [phax/phoss-ap](https://github.com/phax/phoss-ap) – open-source Peppol AP built on phase4 (Spring Boot). The runnable jar `phoss-ap-webapp-<version>.jar` is published on [Maven Central](https://repo1.maven.org/maven2/com/helger/phoss/ap/phoss-ap-webapp/).
 - **Wiki:** [Home · phax/phoss-ap Wiki](https://github.com/phax/phoss-ap/wiki)
-- **Role in the Peppol network:** C3 (receiving, forwarding to the Lobster middleware on the C4 side) and C2 (sending documents and MLS).
+- **Role in the Peppol network:** C3 (receiving, forwarding to the middleware on the C4 side) and C2 (sending documents and MLS).
 - **Helper scripts** for installation, jar switching and updates are part of this page (chapter 7).
 
 ---
@@ -15,7 +13,7 @@ This page describes how to **operate** and **troubleshoot** the Lobster Peppol A
 
 | What                                | Value                                                                                                                         |
 | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| Host                                | `Lobster-Peppol-AS4-Dev` (Amazon Linux 2023)                                                                                  |
+| Host                                | `AS4-Dev` (Amazon Linux 2023)                                                                                  |
 |                                     | `ec2-user`                                                                                                                    |
 | Installation directory (`APP_HOME`) | `/opt/peppol-ap`                                                                                                              |
 | Helper scripts on the server        | `/opt/peppol-ap/helper/`                                                                                                      |
@@ -186,10 +184,10 @@ phase4.api.requiredtoken=****
 
 # --- Receiver check / SMP ---
 peppol.receiver-check.mode=sml
-peppol.smp.url=https://dev-smp-peppol-network.lobster-cloud.com
+peppol.smp.url=https://smp-server.com
 
 # --- AS4 / phase4 ---
-phase4.endpoint.address=https://dev-as4-peppol-network.lobster-cloud.com/as4
+phase4.endpoint.address=https://middleware-server/as4
 phase4.dump.path=${global.datapath}phase4-dumps/
 phase4.dump.mode=grouped
 
@@ -242,7 +240,7 @@ peppol.report.flyway.jdbc.schema-create=${phossap.flyway.jdbc.schema-create}
 duplicate.detection.as4.mode=reject
 duplicate.detection.sbdh.mode=reject
 
-# --- Forwarding to the Lobster middleware ---
+# --- Forwarding to the middleware ---
 forwarding.mode=http_post_sync
 forwarding.http.endpoint=https://<middleware-host>/dw/request/peppol/v2/inbound
 forwarding.c4countrycode.modes=receiver_pid,business_card
@@ -326,7 +324,7 @@ The most important keys, grouped by topic. "Default" is the value phoss-ap uses 
 | Key | Default | Dev | Meaning |
 | --- | --- | --- | --- |
 | `peppol.receiver-check.mode` | `none` | `sml` | check whether the receiver of an inbound message is serviced: `none`, `smp` (fixed SMP from `peppol.smp.url`) or `sml` (lookup per participant). Not serviced → AS4 error `PEPPOL:NOT_SERVICED` |
-| `peppol.smp.url` | – | Lobster dev SMP | SMP for `receiver-check.mode=smp` |
+| `peppol.smp.url` | – | Dev SMP | SMP for `receiver-check.mode=smp` |
 | `peppol.smp.cache.enabled`, `.ttl`, `.max-size` | `true`, `15m`, `1000` | – | cache for outbound SMP lookups |
 | `peppol.smp.timeout.connect` / `.response` | `5s` / `10s` | – | timeouts of all SMP queries |
 | `peppol.dns.servers` | system DNS | – | DNS servers for SML lookups |
@@ -358,8 +356,6 @@ The most important keys, grouped by topic. "Default" is the value phoss-ap uses 
 | `duplicate.detection.as4.mode` / `.sbdh.mode` | `store_and_flag` | `reject` | duplicate AS4 message ID / SBDH instance ID: `reject` = AS4 error to C2, `store_and_flag` = accept and mark |
 
 #### MLS
-
-For further information on MLS, see [BIS Message Level Response (MLS)](https://lobster-team.atlassian.net/wiki/spaces/datanetwork/pages/1080033296/BIS+Message+Level+Response+MLS).
 
 | Key | Default | Dev | Meaning |
 | --- | --- | --- | --- |
@@ -893,7 +889,7 @@ All `/api/**` calls require the header `X-Token: <phase4.api.requiredtoken>` (va
 | `GET /api/reporting/create-tsr/{year}/{month}` / `create-eusr/...` | create Peppol reports (sent automatically on the 2nd of each month) |
 
 ```bash
-curl -s -H "X-Token: <token>" https://dev-as4-peppol-network.lobster-cloud.com/api/inbound/status/<sbdhInstanceID>
+curl -s -H "X-Token: <token>" https://middleware-server.com/api/inbound/status/<sbdhInstanceID>
 ```
 
 ### 5.4 Background jobs
