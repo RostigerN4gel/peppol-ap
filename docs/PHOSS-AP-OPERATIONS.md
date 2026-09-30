@@ -14,7 +14,7 @@ This page describes how to **operate** and **troubleshoot** the Peppol Access Po
 | What                                | Value                                                                                                                         |
 | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | Host                                | `AS4-Dev` (Amazon Linux 2023)                                                                                  |
-|                                     | `ec2-user`                                                                                                                    |
+|                                     | `peppol-user`                                                                                                                    |
 | Installation directory (`APP_HOME`) | `/opt/peppol-ap`                                                                                                              |
 | Helper scripts on the server        | `/opt/peppol-ap/helper/`                                                                                                      |
 | systemd service                     | `phoss-ap` (note: not `peppol-ap`)                                                                                            |
@@ -34,7 +34,7 @@ This page describes how to **operate** and **troubleshoot** the Peppol Access Po
 
 ## 2. Running the daemon
 
-phoss-ap runs as the systemd service `phoss-ap` under the user `ec2-user`. The unit is created by the install script (chapter 7.1) and starts `/opt/peppol-ap/phoss-ap.jar` with the profile `dev`, the working directory `/opt/peppol-ap` and the private JDK. The service is *enabled*, i.e. it starts automatically at boot, and systemd restarts it after a crash (`Restart=on-failure`).
+phoss-ap runs as the systemd service `phoss-ap` under the user `peppol-user`. The unit is created by the install script (chapter 7.1) and starts `/opt/peppol-ap/phoss-ap.jar` with the profile `dev`, the working directory `/opt/peppol-ap` and the private JDK. The service is *enabled*, i.e. it starts automatically at boot, and systemd restarts it after a crash (`Restart=on-failure`).
 
 ### 2.1 First installation
 
@@ -994,7 +994,7 @@ Installs phoss-ap as systemd service (chapter 2.1). Run as root: `sudo ./install
 #   download off, or JDK_ARCHIVE=/path/to/jdk.tar.gz to install from a local
 #   tarball (air-gapped hosts).
 #
-# The service user/group (default: ec2-user) is expected to already exist; this
+# The service user/group (default: peppol-user) is expected to already exist; this
 # script does NOT create or delete it. It can be installed alongside other
 # services (e.g. a tomcat-based one) without conflict.
 #
@@ -1013,7 +1013,7 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 # --- Configuration (override via environment) -------------------------------
 APP_HOME="${APP_HOME:-/opt/peppol-ap}"
 SERVICE_NAME="${SERVICE_NAME:-phoss-ap}"
-SERVICE_USER="${SERVICE_USER:-ec2-user}"
+SERVICE_USER="${SERVICE_USER:-peppol-user}"
 SERVICE_GROUP="${SERVICE_GROUP:-$SERVICE_USER}"
 # Spring profile whose "application-<profile>.properties" gets loaded
 SPRING_PROFILE="${SPRING_PROFILE:-dev}"
@@ -1052,7 +1052,7 @@ fi
 
 # --- Require the service user/group to already exist ------------------------
 # This script does not create (nor delete) the account - the operator is
-# expected to provide it (e.g. the pre-existing 'ec2-user').
+# expected to provide it (e.g. the pre-existing 'peppol-user').
 # Checked up front: it must fail before a (potentially large) JDK download.
 if ! getent group "$SERVICE_GROUP" >/dev/null 2>&1; then
   echo "ERROR: service group '$SERVICE_GROUP' does not exist. Create it first, or set SERVICE_GROUP." >&2
