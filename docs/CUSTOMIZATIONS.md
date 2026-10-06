@@ -20,6 +20,7 @@ webservice. The forwarding is plugged into phoss-ap's `IDocumentForwarderProvide
 | `phoss-ap-core/.../core/inbound/InboundOrchestrator.java` | **patched** | `forwardDocument` overload with an AS4-rejection out-parameter; the synchronous path turns it into an EBMS error. |
 | `phoss-ap-api/.../api/codelist/EInboundStatus.java` | **patched** | New final status `as4_rejected`. |
 | `phoss-ap-db/.../db/InboundTransactionManagerJdbc.java` | **patched** | Duplicate detection ignores `as4_rejected`; lookups by AS4/SBDH ID prefer the retransmission. |
+| `phoss-ap-forwarding/.../forwarding/http/HttpDocumentForwarder.java` | **patched** | Sends the [`X-PHOSS-AP-TRANSACTION-ID` header](#x-phoss-ap-transaction-id-header-fork-specific). |
 
 ## Why a custom SPI forwarder (vs. the built-in HTTP forwarder)
 
@@ -68,7 +69,7 @@ Request POSTed as `application/xml`, with these HTTP request headers:
 | Header | Value |
 |--------|-------|
 | `Content-Type` | `application/xml` |
-| `X-Transaction-ID` | The phoss-ap inbound transaction ID (`inbound_transaction.id`). **Fork addition**, not part of the lobimpl contract. Stays the same across retry attempts of the same transaction, so the Middleware can recognise a retry (e.g. after a lost response) and answer it idempotently instead of rejecting it as a duplicate. Sent as a header rather than an XML element so that receivers validating the envelope strictly are not affected. |
+| `X-PHOSS-AP-TRANSACTION-ID` | The phoss-ap inbound transaction ID (`inbound_transaction.id`). **Fork addition**, not part of the lobimpl contract. Stays the same across retry attempts of the same transaction, so the Middleware can recognise a retry (e.g. after a lost response) and answer it idempotently instead of rejecting it as a duplicate. Sent as a header rather than an XML element so that receivers validating the envelope strictly are not affected. |
 
 Body:
 
@@ -169,8 +170,9 @@ forwarding.spi.id=http-sync-as4-reject
 forwarding.http.endpoint=http://your-host/forwarding/url/sync
 ```
 
-`AS4RejectingHttpForwarder` delegates everything to the unchanged upstream `HttpDocumentForwarder`
-in `http_post_sync` mode (same config keys, request, JSON response contract). The only difference:
+`AS4RejectingHttpForwarder` delegates everything to the upstream `HttpDocumentForwarder` in
+`http_post_sync` mode (same config keys, request, JSON response contract — plus the
+[`X-PHOSS-AP-TRANSACTION-ID` header](#x-phoss-ap-transaction-id-header-fork-specific)). The only difference:
 
 | Middleware answer on the **first, synchronous** attempt | Upstream `http_post_sync` | `http-sync-as4-reject` |
 |---|---|---|
@@ -203,6 +205,19 @@ Details:
 * `as4_rejected` rows are not archived (`getAllForArchival` only picks upstream final states).
 * This deliberately deviates from the Peppol AS4 profile, which expects failures behind C3 to be
   reported via MLS only.
+
+## X-PHOSS-AP-TRANSACTION-ID header (fork-specific)
+
+Both HTTP-based forwarders send the phoss-ap transaction ID (`inbound_transaction.id`) as the HTTP
+request header **`X-PHOSS-AP-TRANSACTION-ID`**:
+
+* `HttpDocumentForwarder` (`http_post_sync`, `http_post_async` and therefore also
+  `http-sync-as4-reject`) — next to the upstream `X-SBDH-Instance-ID` header.
+* `MiddlewareReceiverForwarder` (`middleware-data`) — see the contract above.
+
+The ID stays the same across retry attempts of a transaction, so the backend can recognise a retry
+(e.g. after a lost response) and answer it idempotently instead of rejecting it as a duplicate. A
+retransmission by C2 after an `as4_rejected` answer is a new transaction and gets a new ID.
 
 ## Build
 

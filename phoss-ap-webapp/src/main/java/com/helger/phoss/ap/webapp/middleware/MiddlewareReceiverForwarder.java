@@ -90,7 +90,7 @@ public class MiddlewareReceiverForwarder implements IDocumentForwarder
    * (<code>inbound_transaction.id</code>). It stays the same across retry attempts, so the
    * Middleware can tell a retry from a new delivery.
    */
-  public static final String HEADER_TRANSACTION_ID = "X-Transaction-ID";
+  public static final String HEADER_TRANSACTION_ID = "X-PHOSS-AP-TRANSACTION-ID";
 
   private static final Logger LOGGER = LoggerFactory.getLogger (MiddlewareReceiverForwarder.class);
 

@@ -67,6 +67,8 @@ public class HttpDocumentForwarder implements IDocumentForwarder
   private static final Logger LOGGER = LoggerFactory.getLogger (HttpDocumentForwarder.class);
   private static final int MAX_CUSTOM_HEADERS = 100;
   private static final String HEADER_SBDH_INSTANCE_ID = "X-SBDH-Instance-ID";
+  /** FORK: The ID of the phoss-ap transaction (<code>inbound_transaction.id</code>) */
+  private static final String HEADER_TRANSACTION_ID = "X-PHOSS-AP-TRANSACTION-ID";
   /** @since 0.12.0 */
   private static final String HEADER_VERIFICATION_RESULT = "X-Verification-Result";
   /** @since 0.12.0 */
@@ -285,6 +287,8 @@ public class HttpDocumentForwarder implements IDocumentForwarder
         aPost.setHeader (aEntry.getKey (), aEntry.getValue ());
 
       aPost.setHeader (HEADER_SBDH_INSTANCE_ID, aDocument.sbdhInstanceID ());
+      // FORK: the phoss-ap transaction ID - stays the same across retry attempts
+      aPost.setHeader (HEADER_TRANSACTION_ID, aDocument.id ());
       applyVerificationHeaders (aPost, aDocument);
 
       LOGGER.info ("Forwarding inbound transaction '" +
