@@ -85,6 +85,13 @@ public class MiddlewareReceiverForwarder implements IDocumentForwarder
   /** Provider ID as referenced by <code>forwarding.spi.id</code>. */
   public static final String PROVIDER_ID = "middleware-data";
 
+  /**
+   * HTTP request header carrying the phoss-ap inbound transaction ID
+   * (<code>inbound_transaction.id</code>). It stays the same across retry attempts, so the
+   * Middleware can tell a retry from a new delivery.
+   */
+  public static final String HEADER_TRANSACTION_ID = "X-Transaction-ID";
+
   private static final Logger LOGGER = LoggerFactory.getLogger (MiddlewareReceiverForwarder.class);
 
   private String m_sUrl;
@@ -227,7 +234,7 @@ public class MiddlewareReceiverForwarder implements IDocumentForwarder
 
       // POST and read the response
       final Document aResDoc;
-      try (final InputStream aIS = performHttpRequest (aReqDoc, m_sUrl, false))
+      try (final InputStream aIS = performHttpRequest (aReqDoc, aTx.getID (), m_sUrl, false))
       {
         aResDoc = DOMReader.readXMLDOM (aIS);
       }
@@ -327,6 +334,7 @@ public class MiddlewareReceiverForwarder implements IDocumentForwarder
 
   @NonNull
   private InputStream performHttpRequest (@NonNull final Document aDoc,
+                                          @NonNull final String sTransactionID,
                                           @NonNull final String sUrl,
                                           final boolean bIsRedirect) throws Exception
   {
@@ -345,6 +353,7 @@ public class MiddlewareReceiverForwarder implements IDocumentForwarder
     }
     huc.setRequestMethod ("POST");
     huc.setRequestProperty ("Content-Type", "application/xml");
+    huc.setRequestProperty (HEADER_TRANSACTION_ID, sTransactionID);
     huc.setDoOutput (true);
     huc.setChunkedStreamingMode (512);
 
@@ -366,7 +375,7 @@ public class MiddlewareReceiverForwarder implements IDocumentForwarder
         if (bIsRedirect)
           LOGGER.info ("Already got a redirection, treating as error");
         else
-          return performHttpRequest (aDoc, newLoc, true);
+          return performHttpRequest (aDoc, sTransactionID, newLoc, true);
       }
     }
     catch (final IOException ex)

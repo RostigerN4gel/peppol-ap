@@ -63,7 +63,14 @@ forwarding.middleware.insecure-tls=false
 
 ## Request / response contract (unchanged from lobimpl)
 
-Request POSTed as `application/xml`:
+Request POSTed as `application/xml`, with these HTTP request headers:
+
+| Header | Value |
+|--------|-------|
+| `Content-Type` | `application/xml` |
+| `X-Transaction-ID` | The phoss-ap inbound transaction ID (`inbound_transaction.id`). **Fork addition**, not part of the lobimpl contract. Stays the same across retry attempts of the same transaction, so the Middleware can recognise a retry (e.g. after a lost response) and answer it idempotently instead of rejecting it as a duplicate. Sent as a header rather than an XML element so that receivers validating the envelope strictly are not affected. |
+
+Body:
 
 ```xml
 <InboundPeppolRequest>
