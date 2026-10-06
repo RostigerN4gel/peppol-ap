@@ -24,6 +24,7 @@ import java.security.MessageDigest;
 import java.security.cert.X509Certificate;
 import java.time.Duration;
 import java.time.OffsetDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
@@ -968,7 +969,9 @@ public final class OutboundOrchestrator
       {
         final int nNewAttemptCount = aTx.getAttemptCount () + 1;
         final String sAS4MessageID = MessageHelperMethods.createRandomMessageID ();
-        final OffsetDateTime aAS4Timestamp = aTimestampMgr.getCurrentDateTimeUTC ();
+        // Millisecond precision only - some receivers (e.g. Domibus) reject an eb:Timestamp with more
+        // fraction digits (DOM_007 "Invalid xsd:datetime format")
+        final OffsetDateTime aAS4Timestamp = aTimestampMgr.getCurrentDateTimeUTC ().truncatedTo (ChronoUnit.MILLIS);
 
         // Callback on recoverable error
         final Consumer <String> onFailed = sErrMsg -> {

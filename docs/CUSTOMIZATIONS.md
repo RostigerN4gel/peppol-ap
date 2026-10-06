@@ -21,6 +21,7 @@ webservice. The forwarding is plugged into phoss-ap's `IDocumentForwarderProvide
 | `phoss-ap-api/.../api/codelist/EInboundStatus.java` | **patched** | New final status `as4_rejected`. |
 | `phoss-ap-db/.../db/InboundTransactionManagerJdbc.java` | **patched** | Duplicate detection ignores `as4_rejected`; lookups by AS4/SBDH ID prefer the retransmission. |
 | `phoss-ap-forwarding/.../forwarding/http/HttpDocumentForwarder.java` | **patched** | Sends the [`X-PHOSS-AP-TRANSACTION-ID` header](#x-phoss-ap-transaction-id-header-fork-specific). |
+| `phoss-ap-core/.../core/outbound/OutboundOrchestrator.java` | **patched** | [AS4 timestamp in millisecond precision](#as4-timestamp-in-millisecond-precision-fork-specific) (Domibus compatibility). |
 
 ## Why a custom SPI forwarder (vs. the built-in HTTP forwarder)
 
@@ -218,6 +219,16 @@ request header **`X-PHOSS-AP-TRANSACTION-ID`**:
 The ID stays the same across retry attempts of a transaction, so the backend can recognise a retry
 (e.g. after a lost response) and answer it idempotently instead of rejecting it as a duplicate. A
 retransmission by C2 after an `as4_rejected` answer is a new transaction and gets a new ID.
+
+## AS4 timestamp in millisecond precision (fork-specific)
+
+`OutboundOrchestrator` truncates the outbound AS4 `eb:Timestamp` (and the matching
+`as4_timestamp` of the sending attempt) to **milliseconds**. Upstream uses the full precision of
+`APTimestampManager`, which on Linux / Java 21 yields up to 9 fraction digits. Domibus-based
+receivers such as the European Commission AP (`webgate.ec.europa.eu/ec-peppol-ap-domibus`) reject
+that with `EBMS:0003` / `[DOM_007]:Invalid xsd:datetime format:[2026-10-06T13:15:07.29147455Z]`,
+although it is schema valid. This applies to all outbound sendings (documents, MLS, Peppol
+Reporting). Candidate for an upstream PR.
 
 ## Build
 
