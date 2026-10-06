@@ -10,6 +10,7 @@ Written in English so they can be copied over as-is.
 | [FR-003](FR-003-mls-configuration-robustness.md) | Make MLS configuration parsing robust and observable | `mls.type` fails silently on lower-case values, SBDH `MLS_TYPE` is ignored, dead code in the failure path, `/api/mls/missing` noise |
 | [FR-004](FR-004-as4-rejection-when-mls-undeliverable.md) | Reject the inbound AS4 message when the forwarding failure cannot be reported via MLS | Analysis; opt-in `as4-reject` with an MLS deliverability probe |
 | [FR-005](FR-005-as4-rejection-on-http-forwarding-error.md) | Optionally reject the inbound AS4 message when synchronous HTTP forwarding fails | Concrete, implemented shape of FR-004 (`always` variant) for `http_post_sync`, incl. duplicate handling |
+| [FR-006](FR-006-transaction-id-header-http-forwarding.md) | Send the transaction ID as an HTTP header when forwarding via HTTP | `X-PHOSS-AP-TRANSACTION-ID` next to `X-SBDH-Instance-ID`, so the backend can correlate and tell a retry from a new delivery |
 
 FR-001 is the main request; FR-002 and FR-003 are independent and each valuable on their own.
 For the background analysis in German see [../mls-frage-mls-erst-nach-c4.md](../mls-frage-mls-erst-nach-c4.md).
