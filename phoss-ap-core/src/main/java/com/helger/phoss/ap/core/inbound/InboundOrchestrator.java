@@ -1211,6 +1211,18 @@ public final class InboundOrchestrator
           }
         }
 
+        // The MLS type from the SBDH has priority. If it is missing or invalid, the Peppol default
+        // (FAILURE_ONLY) applies. The configured "mls.type" is only used for outbound documents
+        EPeppolMLSType eMlsType = aPeppolSBD.getMLSType ();
+        if (eMlsType == null)
+        {
+          eMlsType = EPeppolMLSType.DEFAULT;
+          LOGGER.info (sLogPrefix +
+                       "The incoming SBDH contains no valid MLS_TYPE - using the default '" +
+                       eMlsType.getID () +
+                       "' instead");
+        }
+
         // Store SBD in a persistent storage
         final String sDocumentPath = aDocPayloadMgr.storeDocument (APBasicConfig.getStorageInboundPath (),
                                                                    aAS4Timestamp,
@@ -1236,7 +1248,7 @@ public final class InboundOrchestrator
                                                  bIsDuplicateAS4,
                                                  bIsDuplicateSBDH,
                                                  sValidMlsTo,
-                                                 APCoreConfig.getMlsType ());
+                                                 eMlsType);
         final IInboundTransaction aInboundTx = aInboundMgr.getByID (sTxID);
         if (aInboundTx == null)
           throw new IllegalStateException ("Failed to store incoming transaction");

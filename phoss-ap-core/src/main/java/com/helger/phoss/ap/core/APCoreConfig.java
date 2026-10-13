@@ -842,8 +842,10 @@ public final class APCoreConfig
   }
 
   /**
-   * @return The configured MLS type strategy (e.g. always send, failure only). Defaults to
-   *         {@link EPeppolMLSType#ALWAYS_SEND}. Never <code>null</code>.
+   * @return The configured MLS type strategy (e.g. always send, failure only) that is put into the
+   *         SBDH of <b>outbound</b> documents. It is not used for inbound documents, where the MLS
+   *         type of the received SBDH applies. Defaults to {@link EPeppolMLSType#ALWAYS_SEND}. Never
+   *         <code>null</code>.
    */
   @NonNull
   public static EPeppolMLSType getMlsType ()
