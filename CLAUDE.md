@@ -24,17 +24,14 @@ mvn clean install -DskipTests
 
 # Build + export the runnable fat jar into dist/ (recommended)
 JAVA_HOME=/path/to/jdk21 ./helper/build-phoss-ap.sh
-
-# Start / stop the app as a daemon (see helper/ scripts; default APP_HOME=/opt/peppol-ap)
-./helper/start-phoss-ap.sh
-./helper/stop-phoss-ap.sh
 ```
 
 The runnable artifact is the Spring Boot fat jar **`phoss-ap-webapp/target/phoss-ap-webapp-<version>.jar`**
 (main class `com.helger.phoss.ap.webapp.PhossAPApplication`). The other modules are libraries.
 
-End-to-end setup of a Linux dev box (prerequisites, DB, keystore, config, run, systemd,
-troubleshooting): [docs/INSTALL-LINUX-DEV.md](docs/INSTALL-LINUX-DEV.md).
+Running and operating the jar (start/stop and systemd scripts, operations docs, the end-to-end
+Linux dev box setup, feature requests) is **not** part of this repository — it lives in the
+separate private repository [RostigerN4gel/peppol-helper](https://github.com/RostigerN4gel/peppol-helper).
 
 ### Tests need infrastructure
 
@@ -111,13 +108,9 @@ answered by a `ProcessResult` XML). See [CUSTOMIZATIONS.md](docs/CUSTOMIZATIONS.
 
 ## Repo-specific notes
 
-- `helper/` holds the build script, the PID-file based `start-phoss-ap.sh` / `stop-phoss-ap.sh`
-  (no systemd) plus `install-phoss-ap-daemon.sh` / `uninstall-phoss-ap-daemon.sh`, which register
-  the jar as a **systemd** service (enabled on boot, not auto-started), and
-  `start-phoss-ap-daemon.sh` / `stop-phoss-ap-daemon.sh` to drive that service. POSIX `sh`, target a
-  Linux `/opt/peppol-ap` daemon (`APP_HOME`) whose unit is named `phoss-ap` (`SERVICE_NAME`),
-  running as `ec2-user`. See
-  [CUSTOMIZATIONS.md](docs/CUSTOMIZATIONS.md#deployment-helper-scripts-fork-specific).
+- This repository is kept a **pure fork with the code customizations**. `helper/` only holds
+  `build-phoss-ap.sh`; operations scripts and docs belong in
+  [peppol-helper](https://github.com/RostigerN4gel/peppol-helper), not here.
 - `dist/` receives the exported jar from `build-phoss-ap.sh` (without the local profile configs,
   unless `INCLUDE_PROFILE_CONFIG=1`) — do not commit `dist/`.
 - Commit messages / PRs: this is a fork; keep upstream-mergeable changes minimal and isolate fork

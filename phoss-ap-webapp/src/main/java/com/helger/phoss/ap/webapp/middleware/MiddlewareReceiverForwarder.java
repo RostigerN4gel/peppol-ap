@@ -168,7 +168,7 @@ public class MiddlewareReceiverForwarder implements IDocumentForwarder
     // "AB" = accepted, delivery not confirmed. That is the honest statement for a Middleware setup.
     //
     // Reporting the real C4 outcome would require deferring the MLS until the backend reports it;
-    // see docs/feature-requests/FR-001-api-triggered-mls-sending.md. That needs an upstream hook
+    // see FR-001 (docs/feature-requests/ in the peppol-helper repository). That needs an upstream hook
     // (InboundOrchestrator:504-522) and is intentionally NOT worked around here.
     return false;
   }

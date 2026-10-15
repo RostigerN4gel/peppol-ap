@@ -3,8 +3,8 @@
 # Build script for the phoss-ap Peppol Access Point.
 #
 # Produces the runnable Spring Boot "fat jar" (phoss-ap-webapp-<version>.jar)
-# and exports it into an output directory, ready to be deployed next to
-# start-phoss-ap.sh / stop-phoss-ap.sh (default APP_HOME=/opt/peppol-ap).
+# and exports it into an output directory, ready to be deployed with the
+# operations scripts of the peppol-helper repository (default APP_HOME=/opt/peppol-ap).
 #
 # Tests are skipped by default: the full "verify" phase needs a running
 # PostgreSQL (webapp context test) and Docker (Testcontainers S3 IT), which are
@@ -134,4 +134,5 @@ echo "Exported: $OUTPUT_DIR/$JAR_NAME"
 echo ""
 echo "Deploy:"
 echo "  cp \"$OUTPUT_DIR/$JAR_NAME\" /opt/peppol-ap/"
-echo "  ./helper/start-phoss-ap.sh    # or: APP_HOME=/opt/peppol-ap ./helper/start-phoss-ap.sh"
+echo "  then start it with the peppol-helper scripts (start-phoss-ap.sh or"
+echo "  install-phoss-ap-daemon.sh): https://github.com/RostigerN4gel/peppol-helper"
