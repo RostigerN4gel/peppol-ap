@@ -21,6 +21,7 @@ import java.io.IOException;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
+import com.helger.http.CHttp;
 import com.helger.phase4.dynamicdiscovery.Phase4SMPException;
 import com.helger.phase4.util.Phase4Exception;
 import com.helger.smpclient.exception.SMPClientBadResponseException;
@@ -55,8 +56,8 @@ final class SmpLookupFailureClassifier
    */
   private static final String MSG_SUFFIX_NO_MATCHING_ENDPOINT = " - failed to select endpoint from ServiceMetadata";
 
-  /** The minimum HTTP status code that indicates a problem on the SMP side. */
-  private static final int HTTP_SERVER_ERROR_MIN = 500;
+  /** The minimum HTTP status code that indicates a problem on the SMP side (500). */
+  private static final int HTTP_SERVER_ERROR_MIN = CHttp.HTTP_INTERNAL_SERVER_ERROR;
 
   private SmpLookupFailureClassifier ()
   {}

@@ -67,8 +67,8 @@ public class HttpDocumentForwarder implements IDocumentForwarder
   private static final Logger LOGGER = LoggerFactory.getLogger (HttpDocumentForwarder.class);
   private static final int MAX_CUSTOM_HEADERS = 100;
   private static final String HEADER_SBDH_INSTANCE_ID = "X-SBDH-Instance-ID";
-  /** FORK: The ID of the phoss-ap transaction (<code>inbound_transaction.id</code>) */
-  private static final String HEADER_TRANSACTION_ID = "X-PHOSS-AP-TRANSACTION-ID";
+  /** @since 0.13.2 */
+  private static final String HEADER_TRANSACTION_ID = "X-phoss-AP-Transaction-ID";
   /** @since 0.12.0 */
   private static final String HEADER_VERIFICATION_RESULT = "X-Verification-Result";
   /** @since 0.12.0 */
@@ -196,6 +196,24 @@ public class HttpDocumentForwarder implements IDocumentForwarder
   }
 
   /**
+   * Add the headers identifying the document to the outgoing request. The SBDH Instance ID is not
+   * unique per transaction, so the phoss-ap transaction ID is sent as well. It stays the same for
+   * all retries and replays of the same transaction.
+   *
+   * @param aPost
+   *        The request to add the headers to. May not be <code>null</code>.
+   * @param aDocument
+   *        The document to be forwarded. May not be <code>null</code>.
+   * @since 0.13.2
+   */
+  @VisibleForTesting
+  void applyIdentificationHeaders (@NonNull final HttpPost aPost, @NonNull final IForwardableDocument aDocument)
+  {
+    aPost.setHeader (HEADER_SBDH_INSTANCE_ID, aDocument.sbdhInstanceID ());
+    aPost.setHeader (HEADER_TRANSACTION_ID, aDocument.id ());
+  }
+
+  /**
    * Add the verification headers to the outgoing request. The verdict is sent whenever the
    * verification produced one, so that C4 can tell a passed document from an unverified one without
    * a REST lookup. The detailed findings are opt-in and get truncated to fit into the header - the
@@ -286,9 +304,7 @@ public class HttpDocumentForwarder implements IDocumentForwarder
       for (final var aEntry : m_aCustomHeaders.entrySet ())
         aPost.setHeader (aEntry.getKey (), aEntry.getValue ());
 
-      aPost.setHeader (HEADER_SBDH_INSTANCE_ID, aDocument.sbdhInstanceID ());
-      // FORK: the phoss-ap transaction ID - stays the same across retry attempts
-      aPost.setHeader (HEADER_TRANSACTION_ID, aDocument.id ());
+      applyIdentificationHeaders (aPost, aDocument);
       applyVerificationHeaders (aPost, aDocument);
 
       LOGGER.info ("Forwarding inbound transaction '" +

@@ -367,10 +367,10 @@ public class MlsController
                                aTx.getID (),
                                "not-eligible",
                                "The inbound transaction is in the status '" +
-                                            aTx.getStatus ().getID () +
-                                            "' and was therefore not (yet) delivered - only a transaction in the status '" +
-                                            EInboundStatus.FORWARDED.getID () +
-                                            "' can be answered with an MLS from the Receiver Backend");
+                                               aTx.getStatus ().getID () +
+                                               "' and was therefore not (yet) delivered - only a transaction in the status '" +
+                                               EInboundStatus.FORWARDED.getID () +
+                                               "' can be answered with an MLS from the Receiver Backend");
     }
 
     LOGGER.info ("Received the API triggered MLS (" +

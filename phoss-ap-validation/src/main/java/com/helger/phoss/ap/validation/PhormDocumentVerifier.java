@@ -16,17 +16,9 @@
  */
 package com.helger.phoss.ap.validation;
 
-import java.io.IOException;
 import java.io.InputStream;
 import java.util.Arrays;
 
-import org.apache.hc.client5.http.classic.methods.HttpPost;
-import org.apache.hc.core5.http.ContentType;
-import org.apache.hc.core5.http.HttpEntity;
-import org.apache.hc.core5.http.io.entity.ByteArrayEntity;
-import org.apache.hc.core5.http.io.entity.EntityUtils;
-import org.apache.hc.core5.http.io.entity.InputStreamEntity;
-import org.apache.hc.core5.http.message.StatusLine;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
@@ -35,7 +27,8 @@ import org.slf4j.LoggerFactory;
 import com.helger.annotation.Nonempty;
 import com.helger.annotation.style.IsSPIImplementation;
 import com.helger.annotation.style.VisibleForTesting;
-import com.helger.base.numeric.mutable.MutableInt;
+import com.helger.base.io.iface.IHasInputStream;
+import com.helger.base.io.stream.HasInputStream;
 import com.helger.base.string.StringHelper;
 import com.helger.base.url.URLHelper;
 import com.helger.cache.regex.RegExHelper;
@@ -43,12 +36,6 @@ import com.helger.collection.commons.ICommonsList;
 import com.helger.config.IConfig;
 import com.helger.diagnostics.error.IError;
 import com.helger.diagnostics.error.level.EErrorLevel;
-import com.helger.http.CHttpHeader;
-import com.helger.httpclient.HttpClientManager;
-import com.helger.httpclient.HttpClientSettings;
-import com.helger.httpclient.response.ExtendedHttpResponseException;
-import com.helger.json.IJsonObject;
-import com.helger.json.serialize.JsonReader;
 import com.helger.mime.CMimeType;
 import com.helger.mime.IMimeType;
 import com.helger.mime.parse.MimeTypeParser;
@@ -60,7 +47,9 @@ import com.helger.peppolid.IProcessIdentifier;
 import com.helger.peppolid.peppol.doctype.PeppolDocumentTypeIdentifierParts;
 import com.helger.peppolid.peppol.doctype.PeppolGenericDocumentTypeIdentifierParts;
 import com.helger.phive.api.result.ValidationResultList;
-import com.helger.phive.result.json.PhiveJsonHelper;
+import com.helger.phorm.client.PhormClient;
+import com.helger.phorm.client.PhormClientException;
+import com.helger.phorm.client.PhormValidationResult;
 import com.helger.phoss.ap.api.CPhossAP;
 import com.helger.phoss.ap.api.config.APConfigProvider;
 import com.helger.phoss.ap.api.config.APConfigurationProperties;
@@ -69,7 +58,6 @@ import com.helger.phoss.ap.api.model.VerificationIssue;
 import com.helger.phoss.ap.api.model.VerificationOutcome;
 import com.helger.phoss.ap.api.spi.IInboundDocumentVerifierSPI;
 import com.helger.phoss.ap.api.spi.IOutboundDocumentVerifierSPI;
-import com.helger.phoss.ap.basic.APBasicConfig;
 import com.helger.phoss.ap.basic.APBasicMetaManager;
 
 /**
@@ -84,18 +72,11 @@ import com.helger.phoss.ap.basic.APBasicMetaManager;
  * @author Philip Helger
  */
 @IsSPIImplementation
-public class PhormDocumentVerifier implements IInboundDocumentVerifierSPI, IOutboundDocumentVerifierSPI
+public class PhormDocumentVerifier implements IInboundDocumentVerifierSPI, IOutboundDocumentVerifierSPI, AutoCloseable
 {
   /** The ID of this verifier, as used in the telemetry and for the uniqueness check */
   public static final String VERIFIER_ID = "phorm";
 
-  private static final String HTTP_HEADER_X_TOKEN = "X-Token";
-  /** The phorm API that determines the document type of an XML payload and validates it */
-  private static final String API_PATH_DD_AND_VALIDATE = "/api/dd_and_validate/";
-  /** The phorm API that validates a hybrid ZUGFeRD / Factur-X PDF and the XML embedded in it */
-  private static final String API_PATH_HYBRID_VALIDATE = "/api/hybrid_validate";
-  /** The optional query parameter of the hybrid API that drives the country specific rules */
-  private static final String QUERY_PARAM_COUNTRY = "country";
   /** The bytes every PDF document starts with - see ISO 32000-1 chapter 7.5.2 */
   private static final byte [] PDF_HEADER_BYTES = { '%', 'P', 'D', 'F', '-' };
 
@@ -140,35 +121,31 @@ public class PhormDocumentVerifier implements IInboundDocumentVerifierSPI, IOutb
   }
 
   /**
-   * The resolved phorm request: which API to call, with which content type and with which payload.
+   * The resolved phorm call: which API to invoke, with which payload and for which country.
    *
-   * @param apiPath
-   *        The path of the phorm API to call, relative to the configured base URL.
-   * @param contentType
-   *        The content type of the request entity.
+   * @param isHybrid
+   *        <code>true</code> to call the hybrid PDF validation API, <code>false</code> to call the
+   *        regular document type detection and validation API.
    * @param payloadBytes
    *        The payload to send, or <code>null</code> to stream the stored document as-is. Only the
    *        PDF that was extracted from an SBDH "BinaryContent" element needs to be materialized.
    * @param countryC1
-   *        The C1 country code to send as the "country" query parameter, or <code>null</code> for
-   *        none.
+   *        The C1 country code whose hybrid rules shall be applied, or <code>null</code> for the
+   *        phorm side default.
    */
   @VisibleForTesting
-  static record PhormRequest (@NonNull String apiPath,
-                              @NonNull ContentType contentType,
-                              byte @Nullable [] payloadBytes,
-                              @Nullable String countryC1)
+  static record PhormRequest (boolean isHybrid, byte @Nullable [] payloadBytes, @Nullable String countryC1)
   {
     @NonNull
     static PhormRequest ddAndValidate ()
     {
-      return new PhormRequest (API_PATH_DD_AND_VALIDATE, ContentType.APPLICATION_XML, null, null);
+      return new PhormRequest (false, null, null);
     }
 
     @NonNull
     static PhormRequest hybridValidate (final byte @Nullable [] aPDFBytes, @Nullable final String sCountryC1)
     {
-      return new PhormRequest (API_PATH_HYBRID_VALIDATE, ContentType.APPLICATION_PDF, aPDFBytes, sCountryC1);
+      return new PhormRequest (true, aPDFBytes, sCountryC1);
     }
   }
 
@@ -364,64 +341,34 @@ public class PhormDocumentVerifier implements IInboundDocumentVerifierSPI, IOutb
   }
 
   /**
-   * Send the prepared request to phorm and turn the response into a {@link PhormCallResult}.
+   * Provide the stored document as a stream, so that a large document is never materialized. The
+   * document payload manager opens a new {@link InputStream} on every call, so the payload can be
+   * read more than once and the HTTP request therefore stays repeatable.
    *
-   * @param aHttpClientMgr
-   *        The HTTP client manager to use. May not be <code>null</code>.
-   * @param aPost
-   *        The prepared POST request, including its entity. May not be <code>null</code>.
+   * @param aDocPayloadMgr
+   *        The document payload manager to read from. May not be <code>null</code>.
    * @param sDocumentPath
-   *        The path of the stored document - for logging only. May not be <code>null</code>.
+   *        The path of the stored document. May not be <code>null</code>.
    * @return Never <code>null</code>.
-   * @throws IOException
-   *         In case of an HTTP error
    */
   @NonNull
-  private static PhormCallResult _executeAndParse (@NonNull final HttpClientManager aHttpClientMgr,
-                                                   @NonNull final HttpPost aPost,
-                                                   @NonNull @Nonempty final String sDocumentPath) throws IOException
+  private static IHasInputStream _storedDocument (@NonNull final IDocumentPayloadManager aDocPayloadMgr,
+                                                  @NonNull @Nonempty final String sDocumentPath)
   {
-    final MutableInt aStatusCode = new MutableInt (0);
-    final byte [] aResponseBytes = aHttpClientMgr.execute (aPost, aHttpResponse -> {
-      final StatusLine aStatusLine = new StatusLine (aHttpResponse);
-      aStatusCode.set (aStatusLine.getStatusCode ());
-      // Skip all server side errors
-      if (aStatusLine.getStatusCode () >= 500)
-        return null;
+    return HasInputStream.multiple (() -> aDocPayloadMgr.openDocumentStreamForRead (sDocumentPath));
+  }
 
-      // Phorm return 400 in case of invalid validations
-      final HttpEntity aEntity = aHttpResponse.getEntity ();
-      return EntityUtils.toByteArray (aEntity);
-    });
-    if (aResponseBytes == null)
-    {
-      // Server side error (HTTP >= 500) or an empty response entity
-      LOGGER.error ("Phorm returned null response for '" + sDocumentPath + "' with code " + aStatusCode.intValue ());
-      return PhormCallResult.SERVICE_UNAVAILABLE;
-    }
-
-    final IJsonObject aJson = JsonReader.builder ().source (aResponseBytes).readAsObject ();
-    if (aJson == null)
-    {
-      // Phorm answered, but not with something usable
-      LOGGER.error ("Failed to parse Phorm response as JSON for '" +
-                    sDocumentPath +
-                    "' with code " +
-                    aStatusCode.intValue ());
-      return PhormCallResult.RESPONSE_ERROR;
-    }
-
-    // Parse JSON back to data structure
-    final ValidationResultList aResultList = PhiveJsonHelper.getAsValidationResultList (aJson);
-    if (aResultList == null)
-    {
-      LOGGER.error ("Failed to extract validation results from Phorm response for '" +
-                    sDocumentPath +
-                    "' with code " +
-                    aStatusCode.intValue ());
-      return PhormCallResult.RESPONSE_ERROR;
-    }
-
+  /**
+   * Log the outcome of a completed phorm call.
+   *
+   * @param aResultList
+   *        The validation results delivered by phorm. May not be <code>null</code>.
+   * @param sDocumentPath
+   *        The path of the stored document - for logging only. May not be <code>null</code>.
+   */
+  private static void _logResult (@NonNull final ValidationResultList aResultList,
+                                  @NonNull @Nonempty final String sDocumentPath)
+  {
     if (aResultList.containsAtLeastOneError ())
     {
       final int nErrors = aResultList.getAllCount (IError::isError);
@@ -447,12 +394,76 @@ public class PhormDocumentVerifier implements IInboundDocumentVerifierSPI, IOutb
                    aResultList.getOverallValidity () +
                    ")");
     }
-    return PhormCallResult.completed (aResultList);
+  }
+
+  /**
+   * Map a failed phorm call onto the state this verifier reports. The client already tells the
+   * three cases apart - all of them mean that no verdict about the document was produced, they only
+   * differ in whether repeating the call can ever help.
+   *
+   * @param ex
+   *        The exception raised by the client. May not be <code>null</code>.
+   * @param sDocumentPath
+   *        The path of the stored document - for logging only. May not be <code>null</code>.
+   * @return Never <code>null</code>.
+   */
+  @NonNull
+  private static PhormCallResult _toCallResult (@NonNull final PhormClientException ex,
+                                                @NonNull @Nonempty final String sDocumentPath)
+  {
+    LOGGER.error ("Phorm call for '" +
+                  sDocumentPath +
+                  "' did not deliver a result [" +
+                  ex.getErrorType ().getID () +
+                  "]: " +
+                  ex.getMessage ());
+    return switch (ex.getErrorType ())
+    {
+      case REQUEST_ERROR -> PhormCallResult.REQUEST_ERROR;
+      case SERVICE_UNAVAILABLE -> PhormCallResult.SERVICE_UNAVAILABLE;
+      case RESPONSE_ERROR -> PhormCallResult.RESPONSE_ERROR;
+    };
+  }
+
+  /**
+   * Invoke the phorm API that
+   * {@link #_resolveRequest(IDocumentPayloadManager, String, IDocumentTypeIdentifier)} selected.
+   *
+   * @param aClient
+   *        The shared phorm client. May not be <code>null</code>.
+   * @param aRequest
+   *        The resolved request. May not be <code>null</code>.
+   * @param aDocPayloadMgr
+   *        The document payload manager to read from. May not be <code>null</code>.
+   * @param sDocumentPath
+   *        The path of the stored document. May not be <code>null</code>.
+   * @return Never <code>null</code>.
+   * @throws PhormClientException
+   *         If the call did not deliver a result.
+   */
+  @NonNull
+  private static PhormValidationResult _invoke (@NonNull final PhormClient aClient,
+                                                @NonNull final PhormRequest aRequest,
+                                                @NonNull final IDocumentPayloadManager aDocPayloadMgr,
+                                                @NonNull @Nonempty final String sDocumentPath) throws PhormClientException
+  {
+    if (!aRequest.isHybrid ())
+      return aClient.determineAndValidate (_storedDocument (aDocPayloadMgr, sDocumentPath));
+
+    final byte [] aPDFBytes = aRequest.payloadBytes ();
+    if (aPDFBytes != null)
+    {
+      // The PDF that was extracted from the SBDH - it had to be materialized anyway
+      return aClient.hybridValidate (aPDFBytes, aRequest.countryC1 ());
+    }
+
+    // The stored document is the bare PDF
+    return aClient.hybridValidate (_storedDocument (aDocPayloadMgr, sDocumentPath), aRequest.countryC1 ());
   }
 
   @NonNull
-  private PhormCallResult _callPhorm (@NonNull @Nonempty final String sDocumentPath,
-                                      @NonNull final IDocumentTypeIdentifier aDocTypeID)
+  private static PhormCallResult _callPhorm (@NonNull @Nonempty final String sDocumentPath,
+                                             @NonNull final IDocumentTypeIdentifier aDocTypeID)
   {
     final IDocumentPayloadManager aDocPayloadMgr = APBasicMetaManager.getDocPayloadMgr ();
     final IConfig aConfig = APConfigProvider.getConfig ();
@@ -488,55 +499,34 @@ public class PhormDocumentVerifier implements IInboundDocumentVerifierSPI, IOutb
 
     final PhormRequest aRequest = _resolveRequest (aDocPayloadMgr, sDocumentPath, aDocTypeID);
 
-    final StringBuilder aURL = new StringBuilder (StringHelper.trimEnd (sPhormBaseURL, '/'));
-    aURL.append (aRequest.apiPath ());
-    if (aRequest.countryC1 () != null)
-      aURL.append ('?').append (QUERY_PARAM_COUNTRY).append ('=').append (aRequest.countryC1 ());
-    final String sURL = aURL.toString ();
+    LOGGER.info ("Calling Phorm at '" +
+                 sPhormBaseURL +
+                 "' for document '" +
+                 sDocumentPath +
+                 "' using the " +
+                 (aRequest.isHybrid () ? "hybrid" : "regular") +
+                 " validation");
 
-    final HttpClientSettings aHCS = new HttpClientSettings ();
-    APBasicConfig.applyHttpProxySettings (aHCS);
-
-    try (final HttpClientManager aHttpClientMgr = HttpClientManager.create (aHCS))
+    try
     {
-      final HttpPost aPost = new HttpPost (sURL);
-      aPost.setHeader (CHttpHeader.ACCEPT, ContentType.APPLICATION_JSON.getMimeType ());
-      if (StringHelper.isNotEmpty (sPhormToken))
-        aPost.setHeader (HTTP_HEADER_X_TOKEN, sPhormToken);
+      final PhormClient aClient = PhormClientHolder.getClient (sPhormBaseURL, sPhormToken);
+      final PhormValidationResult aResult = _invoke (aClient, aRequest, aDocPayloadMgr, sDocumentPath);
 
-      LOGGER.info ("Calling Phorm at '" + sURL + "' for document '" + sDocumentPath + "'");
-
-      final byte [] aPayloadBytes = aRequest.payloadBytes ();
-      if (aPayloadBytes != null)
+      // A response that carries no convertible result at all - e.g. because phorm reported an
+      // exception of its own instead of a verdict
+      final ValidationResultList aResultList = aResult.getValidationResultList ();
+      if (aResultList == null)
       {
-        // The PDF that was extracted from the SBDH - it had to be materialized anyway
-        aPost.setEntity (new ByteArrayEntity (aPayloadBytes, aRequest.contentType ()));
-        return _executeAndParse (aHttpClientMgr, aPost, sDocumentPath);
+        LOGGER.error ("Phorm delivered no usable validation result for '" + sDocumentPath + "'");
+        return PhormCallResult.RESPONSE_ERROR;
       }
 
-      // Provide as InputStream to be able to handle larger payloads
-      try (final InputStream aDocumentIS = aDocPayloadMgr.openDocumentStreamForRead (sDocumentPath))
-      {
-        aPost.setEntity (new InputStreamEntity (aDocumentIS, aRequest.contentType ()));
-        return _executeAndParse (aHttpClientMgr, aPost, sDocumentPath);
-      }
+      _logResult (aResultList, sDocumentPath);
+      return PhormCallResult.completed (aResultList);
     }
-    catch (final ExtendedHttpResponseException ex)
+    catch (final PhormClientException ex)
     {
-      // A response was received, but with an error status code
-      LOGGER.error ("Phorm returned HTTP error for '" + sDocumentPath + "': " + ex.getMessage ());
-      return PhormCallResult.RESPONSE_ERROR;
-    }
-    catch (final IOException ex)
-    {
-      LOGGER.error ("Failed to call Phorm for '" +
-                    sDocumentPath +
-                    "': " +
-                    ex.getMessage () +
-                    " (" +
-                    ex.getClass ().getName () +
-                    ")");
-      return PhormCallResult.SERVICE_UNAVAILABLE;
+      return _toCallResult (ex, sDocumentPath);
     }
     catch (final Exception ex)
     {
@@ -615,5 +605,15 @@ public class PhormDocumentVerifier implements IInboundDocumentVerifierSPI, IOutb
       case RESPONSE_ERROR -> VerificationOutcome.serviceUnavailable ("Phorm validation service response could not be used - see server log for details");
       case COMPLETED -> _toOutcome (aCall);
     };
+  }
+
+  /**
+   * Close the shared phorm client and its HTTP connection pool. This verifier is registered as an
+   * inbound <em>and</em> as an outbound SPI, so two instances exist and this is called twice - the
+   * second call is a no-op.
+   */
+  public void close ()
+  {
+    PhormClientHolder.shutdown ();
   }
 }

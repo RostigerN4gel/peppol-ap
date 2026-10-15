@@ -49,12 +49,15 @@ import com.helger.phoss.ap.forwarding.MockInboundTransaction;
 import com.helger.phoss.ap.forwarding.MockOutboundMlsTransaction;
 
 /**
- * Test class for class {@link HttpDocumentForwarder}, focusing on the verification headers.
+ * Test class for class {@link HttpDocumentForwarder}, focusing on the identification and verification
+ * headers.
  *
  * @author Philip Helger
  */
 public final class HttpDocumentForwarderTest
 {
+  private static final String HEADER_SBDH_INSTANCE_ID = "X-SBDH-Instance-ID";
+  private static final String HEADER_TRANSACTION_ID = "X-phoss-AP-Transaction-ID";
   private static final String HEADER_RESULT = "X-Verification-Result";
   private static final String HEADER_DETAILS = "X-Verification-Details";
   private static final String HEADER_TRUNCATED = "X-Verification-Details-Truncated";
@@ -97,6 +100,30 @@ public final class HttpDocumentForwarderTest
                                     .add ("location", "/Invoice")
                                     .add ("description", "x".repeat (nDescriptionLength)));
     return aIssues.getAsJsonString ();
+  }
+
+  @Test
+  public void testIdentificationHeaders ()
+  {
+    final HttpDocumentForwarder aForwarder = _createForwarder (false);
+    final HttpPost aPost = new HttpPost (ENDPOINT_URL);
+
+    aForwarder.applyIdentificationHeaders (aPost, _doc (null, null));
+    assertEquals (MockInboundTransaction.SBDH_INSTANCE_ID, aPost.getFirstHeader (HEADER_SBDH_INSTANCE_ID).getValue ());
+    assertEquals (MockInboundTransaction.ID, aPost.getFirstHeader (HEADER_TRANSACTION_ID).getValue ());
+  }
+
+  @Test
+  public void testMlsCopyIdentificationHeaders ()
+  {
+    final HttpDocumentForwarder aForwarder = _createForwarder (false);
+    final HttpPost aPost = new HttpPost (ENDPOINT_URL);
+
+    aForwarder.applyIdentificationHeaders (aPost,
+                                           ForwardableDocument.fromOutboundMlsCopy (new MockOutboundMlsTransaction ()));
+    assertEquals (MockOutboundMlsTransaction.SBDH_INSTANCE_ID,
+                  aPost.getFirstHeader (HEADER_SBDH_INSTANCE_ID).getValue ());
+    assertEquals (MockOutboundMlsTransaction.ID, aPost.getFirstHeader (HEADER_TRANSACTION_ID).getValue ());
   }
 
   @Test

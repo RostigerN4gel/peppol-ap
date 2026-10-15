@@ -69,7 +69,7 @@ public class SentryLoggingConfig
       aAppender.setMinimumBreadcrumbLevel (Level.toLevel (m_sMinimumBreadcrumbLevel, Level.INFO));
       final SentryOptions aOptions = new SentryOptions ();
       aOptions.setDsn (m_sDSN);
-      aOptions.setSendDefaultPii (m_bSendDefaultPII);
+      aOptions.getDataCollection ().setUserInfo (Boolean.valueOf (m_bSendDefaultPII));
       aAppender.setOptions (aOptions);
       aAppender.setContext (aLogCtx);
       aAppender.start ();

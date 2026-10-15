@@ -22,7 +22,7 @@
   <parent>
     <groupId>com.helger.phoss.ap</groupId>
     <artifactId>phoss-ap-parent-pom</artifactId>
-    <version>0.13.1-SNAPSHOT</version>
+    <version>0.13.2-SNAPSHOT</version>
   </parent>
   <artifactId>phoss-ap-validation</artifactId>
   <packaging>jar</packaging>
@@ -50,17 +50,18 @@
       <artifactId>phoss-ap-basic</artifactId>
     </dependency>
 
-    <!-- HTTP client for calling the Validation Service -->
+    <!-- Client for the phorm Validation Service REST API -->
     <dependency>
-      <groupId>com.helger.commons</groupId>
-      <artifactId>ph-json</artifactId>
+      <groupId>com.helger</groupId>
+      <artifactId>phorm-client</artifactId>
     </dependency>
+    <!-- For the HTTP proxy settings handed to the phorm client -->
     <dependency>
       <groupId>com.helger.web</groupId>
       <artifactId>ph-httpclient</artifactId>
     </dependency>
 
-    <!-- phive for parsing validation results -->
+    <!-- phive model for mapping the validation results to verification issues -->
     <dependency>
       <groupId>com.helger.phive</groupId>
       <artifactId>phive-result</artifactId>

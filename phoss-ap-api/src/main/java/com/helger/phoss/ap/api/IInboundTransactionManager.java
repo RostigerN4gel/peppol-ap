@@ -286,8 +286,8 @@ public interface IInboundTransactionManager
    *        The transaction ID. Never <code>null</code>.
    * @param eMlsResponseCode
    *        The MLS response code to claim the slot with. Never <code>null</code>.
-   * @return {@link ESuccess#SUCCESS} if the slot was claimed by this call,
-   *         {@link ESuccess#FAILURE} if an MLS response code was already determined.
+   * @return {@link ESuccess#SUCCESS} if the slot was claimed by this call, {@link ESuccess#FAILURE}
+   *         if an MLS response code was already determined.
    * @since 0.13.0
    */
   @NonNull

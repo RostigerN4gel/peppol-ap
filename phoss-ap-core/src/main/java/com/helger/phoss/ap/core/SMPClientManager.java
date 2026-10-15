@@ -215,6 +215,7 @@ public final class SMPClientManager
     ValueEnforcer.notNull (aParticipantID, "ParticipantID");
     ValueEnforcer.notNull (aSMLInfo, "SMLInfo");
 
+    // The CachingSMPClientReadOnly is using the default SMPClientCache
     return _configure (isCacheEnabled () ? new CachingSMPClientReadOnly (aURLProvider, aParticipantID, aSMLInfo)
                                          : new SMPClientReadOnly (aURLProvider, aParticipantID, aSMLInfo));
   }
@@ -231,6 +232,7 @@ public final class SMPClientManager
   {
     ValueEnforcer.notNull (aSMPHost, "SMPHost");
 
+    // The CachingSMPClientReadOnly is using the default SMPClientCache
     return _configure (isCacheEnabled () ? new CachingSMPClientReadOnly (aSMPHost) : new SMPClientReadOnly (aSMPHost));
   }
 }

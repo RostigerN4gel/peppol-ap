@@ -28,10 +28,10 @@ import org.springframework.util.ClassUtils;
  * application property {@code otel.enabled} is {@code true}.
  * <p>
  * This is deliberately an {@link ApplicationContextInitializer} - registered via
- * {@code META-INF/spring.factories} - and <b>not</b> a bean or an event listener. The
- * initializers run after the environment is prepared but <b>before</b> the context is refreshed,
- * which means before the first bean is created. That ordering is the whole point: the very first
- * span of the application must be able to reach the SDK. Up to 0.12.0 the SDK was installed on the
+ * {@code META-INF/spring.factories} - and <b>not</b> a bean or an event listener. The initializers
+ * run after the environment is prepared but <b>before</b> the context is refreshed, which means
+ * before the first bean is created. That ordering is the whole point: the very first span of the
+ * application must be able to reach the SDK. Up to 0.12.0 the SDK was installed on the
  * {@code ApplicationStartedEvent} instead, which fires after the refresh - so the Flyway migration,
  * which happens during the creation of the AS4 servlet bean and is wrapped in a telemetry span,
  * always got there first. Back then that aborted the startup, because

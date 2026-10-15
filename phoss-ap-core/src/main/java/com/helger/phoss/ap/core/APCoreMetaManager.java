@@ -331,9 +331,35 @@ public final class APCoreMetaManager
   /**
    * Shutdown the core meta manager and release all resources.
    */
+  /**
+   * Close every loaded document verifier that holds a resource. A verifier that talks to a backend
+   * service usually keeps an HTTP connection pool, and the verifier SPIs themselves carry no
+   * lifecycle - see {@link IDocumentVerifier}.
+   */
+  private static void _closeVerifiers ()
+  {
+    final ICommonsList <IDocumentVerifier> aAllVerifiers = new CommonsArrayList <> ();
+    aAllVerifiers.addAll (s_aInboundVerifiers);
+    aAllVerifiers.addAll (s_aOutboundVerifiers);
+    for (final IDocumentVerifier aVerifier : aAllVerifiers)
+      if (aVerifier instanceof final AutoCloseable aClosable)
+        try
+        {
+          aClosable.close ();
+          LOGGER.info ("Closed document verifier '" + aVerifier.getID () + "'");
+        }
+        catch (final Exception ex)
+        {
+          // A failing verifier must not abort the shutdown of everything after it
+          LOGGER.error ("Failed to close document verifier '" + aVerifier.getID () + "'", ex);
+        }
+  }
+
   public static void shutdown ()
   {
     LOGGER.info ("Shutting down APMetaManager");
+
+    _closeVerifiers ();
   }
 
   /**

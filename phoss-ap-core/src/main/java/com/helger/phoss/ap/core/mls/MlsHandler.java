@@ -150,7 +150,8 @@ public final class MlsHandler
   /**
    * Create the outbound MLS response transaction for the outcome of an inbound document, if
    * required by the MLS strategy. The MLS is <b>not</b> sent by this method - the caller decides
-   * when and on which thread that happens, e.g. via {@link #sendCreatedMlsAsync(MlsCreationResult)}.
+   * when and on which thread that happens, e.g. via
+   * {@link #sendCreatedMlsAsync(MlsCreationResult)}.
    *
    * @param aInboundTx
    *        The inbound transaction. Never <code>null</code>.
@@ -184,8 +185,9 @@ public final class MlsHandler
   }
 
   /**
-   * Send an MLS that was previously created by {@link #createInboundResultMls(IInboundTransaction, MlsOutcome)}
-   * asynchronously. Nothing happens if the MLS was suppressed or its creation failed.
+   * Send an MLS that was previously created by
+   * {@link #createInboundResultMls(IInboundTransaction, MlsOutcome)} asynchronously. Nothing
+   * happens if the MLS was suppressed or its creation failed.
    *
    * @param aCreationResult
    *        The result of the MLS creation. May not be <code>null</code>.
@@ -362,9 +364,7 @@ public final class MlsHandler
     if (aDefaultSpidReceiverPID == null)
     {
       // Failed to build PID
-      LOGGER.error ("Failed to create default SPID MLS receiver participant ID with value '" +
-                    sDefaultSpidValue +
-                    "'");
+      LOGGER.error ("Failed to create default SPID MLS receiver participant ID with value '" + sDefaultSpidValue + "'");
       return MlsCreationResult.failure (eResponseCode);
     }
 

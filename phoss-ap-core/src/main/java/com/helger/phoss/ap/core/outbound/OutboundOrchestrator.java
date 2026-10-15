@@ -63,13 +63,12 @@ import com.helger.phase4.dynamicdiscovery.Phase4SMPException;
 import com.helger.phase4.logging.Phase4LogCustomizer;
 import com.helger.phase4.model.message.MessageHelperMethods;
 import com.helger.phase4.peppol.Phase4PeppolSender;
-import com.helger.phase4.peppol.Phase4PeppolSender.PeppolUserMessageBuilder;
-import com.helger.phase4.peppol.Phase4PeppolSender.PeppolUserMessageSBDHBuilder;
 import com.helger.phase4.peppol.Phase4PeppolSendingReport;
 import com.helger.phase4.profile.peppol.Phase4PeppolHttpClientSettings;
 import com.helger.phase4.sender.EAS4UserMessageSendResult;
 import com.helger.phase4.util.Phase4Exception;
 import com.helger.phoss.ap.api.CPhossAP;
+import com.helger.phoss.ap.api.IInboundTransactionManager;
 import com.helger.phoss.ap.api.IOutboundSendingAttemptManager;
 import com.helger.phoss.ap.api.IOutboundTransactionManager;
 import com.helger.phoss.ap.api.codelist.EAttemptStatus;
@@ -136,70 +135,13 @@ public final class OutboundOrchestrator
   /**
    * Immutable result of a single SMP lookup attempt performed by {@link #_performSmpLookup}.
    */
-  private static final class SmpLookupResult
+  private static final record SmpLookupResult (@NonNull ESmpLookupState state,
+                                               @Nullable X509Certificate receiverCert,
+                                               @Nullable String receiverAPURL,
+                                               @Nullable String receiverTechnicalContact,
+                                               @Nullable String errorMessage,
+                                               @Nullable Duration remainingDelay)
   {
-    private final ESmpLookupState m_eState;
-    private final X509Certificate m_aReceiverCert;
-    private final String m_sReceiverAPURL;
-    private final String m_sReceiverTechnicalContact;
-    private final String m_sErrorMessage;
-    private final Duration m_aRemainingDelay;
-
-    private SmpLookupResult (@NonNull final ESmpLookupState eState,
-                             @Nullable final X509Certificate aReceiverCert,
-                             @Nullable final String sReceiverAPURL,
-                             @Nullable final String sReceiverTechnicalContact,
-                             @Nullable final String sErrorMessage,
-                             @Nullable final Duration aRemainingDelay)
-    {
-      m_eState = eState;
-      m_aReceiverCert = aReceiverCert;
-      m_sReceiverAPURL = sReceiverAPURL;
-      m_sReceiverTechnicalContact = sReceiverTechnicalContact;
-      m_sErrorMessage = sErrorMessage;
-      m_aRemainingDelay = aRemainingDelay;
-    }
-
-    @NonNull
-    ESmpLookupState getState ()
-    {
-      return m_eState;
-    }
-
-    @Nullable
-    X509Certificate getReceiverCert ()
-    {
-      return m_aReceiverCert;
-    }
-
-    @Nullable
-    String getReceiverAPURL ()
-    {
-      return m_sReceiverAPURL;
-    }
-
-    @Nullable
-    String getReceiverTechnicalContact ()
-    {
-      return m_sReceiverTechnicalContact;
-    }
-
-    @Nullable
-    String getErrorMessage ()
-    {
-      return m_sErrorMessage;
-    }
-
-    /**
-     * @return The remaining delay of the circuit breaker. Only set for
-     *         {@link ESmpLookupState#CIRCUIT_OPEN}.
-     */
-    @Nullable
-    Duration getRemainingDelay ()
-    {
-      return m_aRemainingDelay;
-    }
-
     @NonNull
     static SmpLookupResult success (@Nullable final X509Certificate aReceiverCert,
                                     @Nullable final String sReceiverAPURL,
@@ -213,6 +155,11 @@ public final class OutboundOrchestrator
                                   null);
     }
 
+    /**
+     * @param sErrorMessage
+     *        DNS lookup error
+     * @return SMP lookup error with a Participant not being registered in the Peppol Network
+     */
     @NonNull
     static SmpLookupResult notRegistered (@NonNull final String sErrorMessage)
     {
@@ -233,6 +180,9 @@ public final class OutboundOrchestrator
   }
 
   private static final Logger LOGGER = LoggerFactory.getLogger (OutboundOrchestrator.class);
+
+  /** The maximum number of exception causes contained in an error message. */
+  private static final int MAX_ERROR_CAUSE_DEPTH = 10;
 
   /** Private constructor to prevent instantiation of this utility class. */
   private OutboundOrchestrator ()
@@ -261,12 +211,27 @@ public final class OutboundOrchestrator
     final ICommonsList <VerificationIssue> aWarnings = new CommonsArrayList <> ();
     for (final IOutboundDocumentVerifierSPI aVerifier : APCoreMetaManager.getAllOutboundVerifiers ())
     {
-      final VerificationOutcome aOutcome = aVerifier.verifyOutboundDocument (sDocumentPath, aDocTypeID, aProcessID);
-      if (!aOutcome.isPassed ())
-        return new VerifierResult (aVerifier.getID (), aVerifier.getVerifierName (), aOutcome);
+      try
+      {
+        final VerificationOutcome aOutcome = aVerifier.verifyOutboundDocument (sDocumentPath, aDocTypeID, aProcessID);
+        if (!aOutcome.isPassed ())
+        {
+          // First failure stops the others
+          return new VerifierResult (aVerifier.getID (), aVerifier.getVerifierName (), aOutcome);
+        }
 
-      // Keep the warnings of an accepting verifier - they are reported back on success
-      aWarnings.addAll (aOutcome.getAllIssues ());
+        // Keep the warnings of an accepting verifier - they are reported back on success
+        aWarnings.addAll (aOutcome.getAllIssues ());
+      }
+      catch (final Exception ex)
+      {
+        LOGGER.error ("Error running outbound document verifier '" +
+                      aVerifier.getID () +
+                      "' (" +
+                      aVerifier.getVerifierName () +
+                      ")",
+                      ex);
+      }
     }
     return VerifierResult.passed (VerificationOutcome.passed (aWarnings));
   }
@@ -430,7 +395,7 @@ public final class OutboundOrchestrator
       }
     }
 
-    // Create in pending state
+    // Create transaction in pending state
     final String sMlsInboundTransactionID = null;
     final String sTransactionID = aOutboundMgr.create (ETransactionType.BUSINESS_DOCUMENT,
                                                        aSenderID.getURIEncoded (),
@@ -516,8 +481,7 @@ public final class OutboundOrchestrator
     final MessageDigest aMD = HashHelper.createMessageDigest ();
     // 1. Count size
     // 2. Create message digest
-    // 3. Copy SBDH to a temporary file - the final name can only be deduced
-    // after reading the SBDH
+    // 3. Copy SBDH to a temporary file - the final name can only be deduced after reading the SBDH
     // as it contains the InstanceIdentifier
     // 4. Parse the SBDH
     try (final CountingInputStream aCountingIS = new CountingInputStream (aSbdIS);
@@ -596,8 +560,7 @@ public final class OutboundOrchestrator
 
     final IOutboundTransactionManager aMgr = APJdbcMetaManager.getOutboundTransactionMgr ();
 
-    // Create in pending state
-
+    // Create transaction in pending state
     final String sInboundTxID = null;
     final String sSbdhStandard = null;
     final String sSbdhTypeVersion = null;
@@ -659,11 +622,43 @@ public final class OutboundOrchestrator
   {
     final String sValue = aReceiverID.getValue ();
     final String sPrefix = SPIDHelper.SPIS_PARTICIPANT_ID_SCHEME + ":";
-    if (sValue == null || !sValue.startsWith (sPrefix) || sValue.length () < sPrefix.length () + 6)
+    if (sValue == null || !sValue.startsWith (sPrefix) || sValue.length () < sPrefix.length () + SPIDHelper.LEN_MAIN_ID)
       return null;
 
-    final String sMainID = sValue.substring (sPrefix.length (), sPrefix.length () + 6);
+    final String sMainID = sValue.substring (sPrefix.length (), sPrefix.length () + SPIDHelper.LEN_MAIN_ID);
     return aIF.createParticipantIdentifierWithDefaultScheme (sPrefix + sMainID);
+  }
+
+  /**
+   * Create an error message from the provided exception that also contains the messages of all
+   * causes. The outermost message alone often hides the real problem - e.g. for an SMP response
+   * signed by an untrusted certificate the outermost message only says that the SMP endpoint could
+   * not be resolved, while the reason is two causes deeper.
+   *
+   * @param aEx
+   *        The exception to get the message from. May not be <code>null</code>.
+   * @return The combined error message. Never <code>null</code>.
+   * @since 0.13.1
+   */
+  @NonNull
+  @VisibleForTesting
+  static String getErrorMessageWithCauses (@NonNull final Throwable aEx)
+  {
+    final StringBuilder aSB = new StringBuilder ();
+    aSB.append (aEx.getMessage () != null ? aEx.getMessage () : aEx.getClass ().getSimpleName ());
+
+    // Limit the depth, to be safe against cyclic cause chains
+    Throwable aCur = aEx;
+    int nDepth = 0;
+    while (aCur.getCause () != null && aCur.getCause () != aCur && nDepth < MAX_ERROR_CAUSE_DEPTH)
+    {
+      aCur = aCur.getCause ();
+      aSB.append (nDepth == 0 ? ". Technical details: " : " - ").append (aCur.getClass ().getSimpleName ());
+      if (aCur.getMessage () != null)
+        aSB.append (": ").append (aCur.getMessage ());
+      nDepth++;
+    }
+    return aSB.toString ();
   }
 
   /**
@@ -730,10 +725,12 @@ public final class OutboundOrchestrator
           return SmpLookupResult.notRegistered (sMsg + ". Technical details: " + ex.getMessage ());
         }
 
-        // Perform SMP lookup
+        // Perform SMP lookup with circuit breaker
         final String sCircuitBreakerKeySMP = "smp$" + aSMPClient.getSMPHostURI ();
         if (!CircuitBreakerManager.tryAcquirePermit (sCircuitBreakerKeySMP))
         {
+          // Access to the SMP is temporarily blocked to avoid it get spammed with additional
+          // queries with a high likelihood to fail
           aLookupSW.stop ();
           aSendingReport.setLookupError (CircuitBreakerManager.getRejectionMessage (sCircuitBreakerKeySMP,
                                                                                     "SMP access to '" +
@@ -759,7 +756,7 @@ public final class OutboundOrchestrator
           final AS4EndpointDetailProviderPeppol aEndpointDetails = AS4EndpointDetailProviderPeppol.create (aSMPClient);
           try
           {
-            // Throws an exception in case of error
+            // This performs the main SMP lookup. Throws an exception in case of error
             aEndpointDetails.init (aDocTypeID, aProcessID, aReceiverID);
             aLookupSW.stop ();
             final X509Certificate aReceiverCert = aEndpointDetails.getReceiverAPCertificate ();
@@ -808,22 +805,24 @@ public final class OutboundOrchestrator
             }
             aSendingReport.setLookupDurationMillis (aLookupSW.getMillis ());
 
+            // The real reason (e.g. an untrusted SMP certificate) is usually in the causes
+            final String sErrMsg = getErrorMessageWithCauses (ex);
             if (eFailureKind.isNegativeAnswer ())
             {
               // Independent of isRetryFeasible() - retrying an unregistered receiver against the
               // same SMP cannot succeed
-              return SmpLookupResult.notRegistered (ex.getMessage ());
+              return SmpLookupResult.notRegistered (sErrMsg);
             }
             if (eFailureKind.isSmpUnavailable ())
             {
               // Independent of isRetryFeasible() - phase4 reports a connection failure, a timeout
               // and a HTTP 5xx as "retry not feasible", which would permanently fail a
               // transaction just because the SMP was unreachable for a moment
-              return SmpLookupResult.retry (ex.getMessage ());
+              return SmpLookupResult.retry (sErrMsg);
             }
             if (ex.isRetryFeasible ())
-              return SmpLookupResult.retry (ex.getMessage ());
-            return SmpLookupResult.notRegistered (ex.getMessage ());
+              return SmpLookupResult.retry (sErrMsg);
+            return SmpLookupResult.notRegistered (sErrMsg);
           }
         }
         finally
@@ -939,9 +938,10 @@ public final class OutboundOrchestrator
   {
     final IAPTimestampManager aTimestampMgr = APBasicMetaManager.getTimestampMgr ();
     final IIdentifierFactory aIF = APBasicMetaManager.getIdentifierFactory ();
-    final IOutboundTransactionManager aTxMgr = APJdbcMetaManager.getOutboundTransactionMgr ();
-    final IOutboundSendingAttemptManager aAttemptMgr = APJdbcMetaManager.getOutboundSendingAttemptMgr ();
+    final IOutboundTransactionManager aOutboundTxMgr = APJdbcMetaManager.getOutboundTransactionMgr ();
+    final IOutboundSendingAttemptManager aOutboundAttemptMgr = APJdbcMetaManager.getOutboundSendingAttemptMgr ();
     final IDocumentPayloadManager aDocPayloadMgr = APBasicMetaManager.getDocPayloadMgr ();
+    final IInboundTransactionManager aInboundTxMgr = APJdbcMetaManager.getInboundTransactionMgr ();
 
     final String sTxID = aTx.getID ();
     final EPeppolNetwork ePeppolStage = APCoreConfig.getPeppolStage ();
@@ -973,21 +973,53 @@ public final class OutboundOrchestrator
         // fraction digits (DOM_007 "Invalid xsd:datetime format")
         final OffsetDateTime aAS4Timestamp = aTimestampMgr.getCurrentDateTimeUTC ().truncatedTo (ChronoUnit.MILLIS);
 
-        // Callback on recoverable error
-        final Consumer <String> onFailed = sErrMsg -> {
-          aAttemptMgr.create (sTxID,
-                              sAS4MessageID,
-                              aAS4Timestamp,
-                              null,
-                              null,
-                              EAttemptStatus.FAILED,
-                              sErrMsg,
-                              aSendingReport.getAsJsonString ());
+        // Callback on recoverable error, that is retried independent of the attempt count. Only
+        // to be used where the specification mandates an unlimited retry
+        final Consumer <String> onFailedUnlimited = sErrMsg -> {
+          aOutboundAttemptMgr.create (sTxID,
+                                      sAS4MessageID,
+                                      aAS4Timestamp,
+                                      (String) null,
+                                      (Integer) null,
+                                      EAttemptStatus.FAILED,
+                                      sErrMsg,
+                                      aSendingReport.getAsJsonString ());
           final OffsetDateTime aNextRetry = BackoffCalculator.calculateNextRetry (nNewAttemptCount,
                                                                                   APCoreConfig.getRetrySendingInitialBackoff (),
                                                                                   APCoreConfig.getRetrySendingBackoffMultiplier (),
                                                                                   APCoreConfig.getRetrySendingMaxBackoff ());
-          aTxMgr.updateStatusAndRetry (sTxID, EOutboundStatus.FAILED, nNewAttemptCount, aNextRetry, sErrMsg);
+          aOutboundTxMgr.updateStatusAndRetry (sTxID, EOutboundStatus.FAILED, nNewAttemptCount, aNextRetry, sErrMsg);
+        };
+
+        // Callback on permanent failure
+        final Consumer <String> onPermanentFailure = sErrMsg -> {
+          aOutboundAttemptMgr.create (sTxID,
+                                      sAS4MessageID,
+                                      aAS4Timestamp,
+                                      (String) null,
+                                      (Integer) null,
+                                      EAttemptStatus.FAILED,
+                                      sErrMsg,
+                                      aSendingReport.getAsJsonString ());
+          aOutboundTxMgr.updateStatusAndRetry (sTxID,
+                                               EOutboundStatus.PERMANENTLY_FAILED,
+                                               nNewAttemptCount,
+                                               (OffsetDateTime) null,
+                                               sErrMsg);
+
+          // Notify
+          for (final var aHandler : APCoreMetaManager.getAllNotificationHandlers ())
+            aHandler.onOutboundPermanentSendingFailure (sTxID, aTx.getSbdhInstanceID (), sErrMsg);
+        };
+
+        // Callback on recoverable error - fails permanently once the maximum number of attempts is
+        // reached, so that a permanent problem (e.g. an untrusted SMP certificate) cannot keep a
+        // transaction in the retry loop forever
+        final Consumer <String> onFailed = sErrMsg -> {
+          if (nNewAttemptCount >= APCoreConfig.getRetrySendingMaxAttempts ())
+            onPermanentFailure.accept (sErrMsg);
+          else
+            onFailedUnlimited.accept (sErrMsg);
         };
 
         // Callback on a rejection by a circuit breaker. Nothing was tried at all, so this must not
@@ -1024,24 +1056,11 @@ public final class OutboundOrchestrator
                        ")");
 
           // The attempt count is left unchanged, because nothing was tried
-          aTxMgr.updateStatusAndRetry (sTxID, EOutboundStatus.FAILED, aTx.getAttemptCount (), aNextRetry, sErrMsg);
-        };
-
-        // Callback on permanent failure
-        final Consumer <String> onPermanentFailure = sErrMsg -> {
-          aAttemptMgr.create (sTxID,
-                              sAS4MessageID,
-                              aAS4Timestamp,
-                              null,
-                              null,
-                              EAttemptStatus.FAILED,
-                              sErrMsg,
-                              aSendingReport.getAsJsonString ());
-          aTxMgr.updateStatusAndRetry (sTxID, EOutboundStatus.PERMANENTLY_FAILED, nNewAttemptCount, null, sErrMsg);
-
-          // Notify
-          for (final var aHandler : APCoreMetaManager.getAllNotificationHandlers ())
-            aHandler.onOutboundPermanentSendingFailure (sTxID, aTx.getSbdhInstanceID (), sErrMsg);
+          aOutboundTxMgr.updateStatusAndRetry (sTxID,
+                                               EOutboundStatus.FAILED,
+                                               aTx.getAttemptCount (),
+                                               aNextRetry,
+                                               sErrMsg);
         };
 
         // Add all information from the transaction into the sending report as soon as possible so
@@ -1084,7 +1103,7 @@ public final class OutboundOrchestrator
             final String sInboundTxID = aTx.getMlsInboundTransactionID ();
             if (StringHelper.isNotEmpty (sInboundTxID))
             {
-              final var aInboundTx = APJdbcMetaManager.getInboundTransactionMgr ().getByID (sInboundTxID);
+              final var aInboundTx = aInboundTxMgr.getByID (sInboundTxID);
               if (aInboundTx != null)
                 sRefSbdhInstanceID = aInboundTx.getSbdhInstanceID ();
             }
@@ -1103,7 +1122,7 @@ public final class OutboundOrchestrator
         aSendingReport.setProcessID (aProcessID);
 
         // Avoid message is taken by another thread
-        aTxMgr.updateStatus (sTxID, EOutboundStatus.SENDING);
+        aOutboundTxMgr.updateStatus (sTxID, EOutboundStatus.SENDING);
 
         // Hoisted out of the SMP span scope so the AS4 send section can read them
         X509Certificate aReceiverCertOut = null;
@@ -1113,7 +1132,7 @@ public final class OutboundOrchestrator
         // This guard checks, that this never happens in production
         if (APCoreConfig.isOutboundDevLoopbackEnabled ())
         {
-          // Get our own, hardcoded AP endpoint URL
+          // Get our own, hard coded AP endpoint URL
           final String sAPURL = APCoreConfig.getPhase4EndpointAddress ();
           if (StringHelper.isEmpty (sAPURL))
           {
@@ -1163,10 +1182,9 @@ public final class OutboundOrchestrator
 
           // MLS SPOG section 5.4: if the custom MLS_TO receiver is not reachable, notify and fall
           // back to the default SPID receiver
-          if (aLookupResult.getState () == ESmpLookupState.NOT_REGISTERED &&
+          if (aLookupResult.state () == ESmpLookupState.NOT_REGISTERED &&
               aEffectiveMlsFallback != null &&
-              !aEffectiveReceiverID.getURIEncoded ()
-                                   .equals (aEffectiveMlsFallback.getFallbackReceiverID ().getURIEncoded ()))
+              !aEffectiveReceiverID.hasSameContent (aEffectiveMlsFallback.getFallbackReceiverID ()))
           {
             LOGGER.warn (sRealLogPrefix +
                          "The custom MLS receiver '" +
@@ -1193,18 +1211,19 @@ public final class OutboundOrchestrator
                                                aSendingReport);
           }
 
-          if (aLookupResult.getState () != ESmpLookupState.SUCCESS)
+          if (aLookupResult.state () != ESmpLookupState.SUCCESS)
           {
-            final String sErrMsg = aLookupResult.getErrorMessage ();
-            if (aLookupResult.getState () == ESmpLookupState.CIRCUIT_OPEN)
+            final String sErrMsg = aLookupResult.errorMessage ();
+            if (aLookupResult.state () == ESmpLookupState.CIRCUIT_OPEN)
             {
               // The SMP was not contacted at all - queue and retry without consuming an attempt
-              onCircuitOpen.accept (sErrMsg, aLookupResult.getRemainingDelay ());
+              onCircuitOpen.accept (sErrMsg, aLookupResult.remainingDelay ());
             }
             else
-              if (aLookupResult.getState () == ESmpLookupState.RETRY)
+              if (aLookupResult.state () == ESmpLookupState.RETRY)
               {
-                // Transient error - queue and retry the same receiver
+                // Transient error - queue and retry the same receiver, up to the maximum number of
+                // attempts
                 onFailed.accept (sErrMsg);
               }
               else
@@ -1212,7 +1231,7 @@ public final class OutboundOrchestrator
                 {
                   // MLS SPOG section 5.4: the (default SPID) MLS receiver is not reachable - queue
                   // and retry per PNP Rule MLS-4 instead of failing permanently
-                  onFailed.accept (sErrMsg);
+                  onFailedUnlimited.accept (sErrMsg);
                 }
                 else
                 {
@@ -1223,9 +1242,9 @@ public final class OutboundOrchestrator
             return aSendingReport;
           }
 
-          aReceiverCertOut = aLookupResult.getReceiverCert ();
-          sReceiverAPURLOut = aLookupResult.getReceiverAPURL ();
-          sReceiverTechnicalContactOut = aLookupResult.getReceiverTechnicalContact ();
+          aReceiverCertOut = aLookupResult.receiverCert ();
+          sReceiverAPURLOut = aLookupResult.receiverAPURL ();
+          sReceiverTechnicalContactOut = aLookupResult.receiverTechnicalContact ();
         }
 
         // Final aliases — the SMP scope hoisted these as nullable locals so they remain visible
@@ -1251,6 +1270,7 @@ public final class OutboundOrchestrator
             aSendingReport.setAS4MessageID (sAS4MessageID);
             aSendingReport.setAS4SendingDT (aAS4Timestamp);
 
+            // In Peppol the AS4 Conversation ID has no specific meaning, so no need to pass that in
             final String sAS4ConversationID = MessageHelperMethods.createRandomConversationID ();
             aSendingReport.setAS4ConversationID (sAS4ConversationID);
 
@@ -1274,38 +1294,38 @@ public final class OutboundOrchestrator
               {
                 case PAYLOAD_ONLY:
                 {
-                  final PeppolUserMessageBuilder aBuilder;
-                  aBuilder = Phase4PeppolSender.builder ()
-                                               .httpClientFactory (aHCS)
-                                               // AS4 input
-                                               .messageID (sAS4MessageID)
-                                               .conversationID (sAS4ConversationID)
-                                               .sendingDateTime (aAS4Timestamp)
-                                               // Peppol IDs
-                                               .senderParticipantID (aSenderID)
-                                               .receiverParticipantID (aEffectiveReceiverID)
-                                               .documentTypeID (aDocTypeID)
-                                               .processID (aProcessID)
-                                               .countryC1 (aTx.getC1CountryCode ())
-                                               .senderPartyID (sC2SeatID)
-                                               .sbdhInstanceIdentifier (aTx.getSbdhInstanceID ())
-                                               // Certificate stuff
-                                               .peppolAP_CAChecker (aAPCAChecker)
-                                               .endpointDetailProvider (new AS4EndpointDetailProviderConstant (aReceiverCert,
-                                                                                                               sReceiverAPURL,
-                                                                                                               sReceiverTechnicalContact))
-                                               .certificateConsumer ((aAPCertificate, aCheckDT, eCertCheckResult) -> {
-                                                 // Take specifically the
-                                                 // AP certificate
-                                                 // verification
-                                                 aSendingReport.setC3CertCheckDT (aCheckDT);
-                                                 aSendingReport.setC3CertCheckResult (eCertCheckResult);
-                                               })
-                                               // Response stuff
-                                               .rawResponseConsumer (aSendingReport::setRawHttpResponse)
-                                               .signalMsgConsumer ((aSignalMsg, aMessageMetadata, aState) -> {
-                                                 aSendingReport.setAS4ReceivedSignalMsg (aSignalMsg);
-                                               });
+                  final var aBuilder = Phase4PeppolSender.builder ()
+                                                         .httpClientFactory (aHCS)
+                                                         // AS4 input
+                                                         .messageID (sAS4MessageID)
+                                                         .conversationID (sAS4ConversationID)
+                                                         .sendingDateTime (aAS4Timestamp)
+                                                         // Peppol IDs
+                                                         .senderParticipantID (aSenderID)
+                                                         .receiverParticipantID (aEffectiveReceiverID)
+                                                         .documentTypeID (aDocTypeID)
+                                                         .processID (aProcessID)
+                                                         .countryC1 (aTx.getC1CountryCode ())
+                                                         .senderPartyID (sC2SeatID)
+                                                         .sbdhInstanceIdentifier (aTx.getSbdhInstanceID ())
+                                                         // Certificate stuff
+                                                         .peppolAP_CAChecker (aAPCAChecker)
+                                                         .endpointDetailProvider (new AS4EndpointDetailProviderConstant (aReceiverCert,
+                                                                                                                         sReceiverAPURL,
+                                                                                                                         sReceiverTechnicalContact))
+                                                         .certificateConsumer ((aAPCertificate,
+                                                                                aCheckDT,
+                                                                                eCertCheckResult) -> {
+                                                           // Take specifically the AP certificate
+                                                           // verification
+                                                           aSendingReport.setC3CertCheckDT (aCheckDT);
+                                                           aSendingReport.setC3CertCheckResult (eCertCheckResult);
+                                                         })
+                                                         // Response stuff
+                                                         .rawResponseConsumer (aSendingReport::setRawHttpResponse)
+                                                         .signalMsgConsumer ((aSignalMsg, aMessageMetadata, aState) -> {
+                                                           aSendingReport.setAS4ReceivedSignalMsg (aSignalMsg);
+                                                         });
 
                   // Add the optional SBDH parameters required for e.g. PDF sending
                   if (StringHelper.isNotEmpty (aTx.getSbdhStandard ()))
@@ -1426,38 +1446,33 @@ public final class OutboundOrchestrator
                     }
                   }
 
-                  final PeppolUserMessageSBDHBuilder aBuilder = Phase4PeppolSender.sbdhBuilder ()
-                                                                                  .httpClientFactory (aHCS)
-                                                                                  // AS4 input
-                                                                                  .messageID (sAS4MessageID)
-                                                                                  .conversationID (sAS4ConversationID)
-                                                                                  .sendingDateTime (aAS4Timestamp)
-                                                                                  // SBD
-                                                                                  .payloadAndMetadata (aSbdData)
-                                                                                  // Remaining IDs
-                                                                                  .senderPartyID (sC2SeatID)
-                                                                                  // Certificate
-                                                                                  // stuff
-                                                                                  .peppolAP_CAChecker (aAPCAChecker)
-                                                                                  .endpointDetailProvider (new AS4EndpointDetailProviderConstant (aReceiverCert,
-                                                                                                                                                  sReceiverAPURL,
-                                                                                                                                                  sReceiverTechnicalContact))
-                                                                                  .certificateConsumer ((aAPCertificate,
-                                                                                                         aCheckDT,
-                                                                                                         eCertCheckResult) -> {
-                                                                                    // Determined by
-                                                                                    // SMP
-                                                                                    // lookup
-                                                                                    aSendingReport.setC3CertCheckDT (aCheckDT);
-                                                                                    aSendingReport.setC3CertCheckResult (eCertCheckResult);
-                                                                                  })
-                                                                                  // Response stuff
-                                                                                  .rawResponseConsumer (aSendingReport::setRawHttpResponse)
-                                                                                  .signalMsgConsumer ((aSignalMsg,
-                                                                                                       aMessageMetadata,
-                                                                                                       aState) -> {
-                                                                                    aSendingReport.setAS4ReceivedSignalMsg (aSignalMsg);
-                                                                                  });
+                  final var aBuilder = Phase4PeppolSender.sbdhBuilder ()
+                                                         .httpClientFactory (aHCS)
+                                                         // AS4 input
+                                                         .messageID (sAS4MessageID)
+                                                         .conversationID (sAS4ConversationID)
+                                                         .sendingDateTime (aAS4Timestamp)
+                                                         // SBD
+                                                         .payloadAndMetadata (aSbdData)
+                                                         // Remaining IDs
+                                                         .senderPartyID (sC2SeatID)
+                                                         // Certificate stuff
+                                                         .peppolAP_CAChecker (aAPCAChecker)
+                                                         .endpointDetailProvider (new AS4EndpointDetailProviderConstant (aReceiverCert,
+                                                                                                                         sReceiverAPURL,
+                                                                                                                         sReceiverTechnicalContact))
+                                                         .certificateConsumer ((aAPCertificate,
+                                                                                aCheckDT,
+                                                                                eCertCheckResult) -> {
+                                                           // Determined by SMP lookup
+                                                           aSendingReport.setC3CertCheckDT (aCheckDT);
+                                                           aSendingReport.setC3CertCheckResult (eCertCheckResult);
+                                                         })
+                                                         // Response stuff
+                                                         .rawResponseConsumer (aSendingReport::setRawHttpResponse)
+                                                         .signalMsgConsumer ((aSignalMsg, aMessageMetadata, aState) -> {
+                                                           aSendingReport.setAS4ReceivedSignalMsg (aSignalMsg);
+                                                         });
                   eResult = Telemetry.withSpan (CPhossAPOtel.SPAN_OUTBOUND_AS4_SEND,
                                                 ETelemetrySpanKind.CLIENT,
                                                 aSendSpan -> {
@@ -1503,12 +1518,9 @@ public final class OutboundOrchestrator
                 aSendingReport.setOverallSuccess (false);
 
                 // Call after any Sending Report modifications
-                final String sErrorMsg = ex != null ? ex.getMessage ()
+                final String sErrorMsg = ex != null ? getErrorMessageWithCauses (ex)
                                                     : "Error in AS4 sending with result code " + eResult;
-                if (nNewAttemptCount >= APCoreConfig.getRetrySendingMaxAttempts ())
-                  onPermanentFailure.accept (sErrorMsg);
-                else
-                  onFailed.accept (sErrorMsg);
+                onFailed.accept (sErrorMsg);
               }
               else
               {
@@ -1522,14 +1534,14 @@ public final class OutboundOrchestrator
                 final String sAS4ReceiptID = aSendingReport.getAS4ReceivedSignalMsg ()
                                                            .getMessageInfo ()
                                                            .getMessageId ();
-                aAttemptMgr.createSuccess (sTxID,
-                                           sAS4MessageID,
-                                           aAS4Timestamp,
-                                           sAS4ReceiptID,
-                                           aSendingReport.getAsJsonString ());
+                aOutboundAttemptMgr.createSuccess (sTxID,
+                                                   sAS4MessageID,
+                                                   aAS4Timestamp,
+                                                   sAS4ReceiptID,
+                                                   aSendingReport.getAsJsonString ());
 
                 // Update in DB
-                aTxMgr.updateStatusCompleted (sTxID, EOutboundStatus.SENT);
+                aOutboundTxMgr.updateStatusCompleted (sTxID, EOutboundStatus.SENT);
 
                 // Lifecycle event: outbound sent
                 {
@@ -1580,10 +1592,7 @@ public final class OutboundOrchestrator
               aSendingReport.setOverallSuccess (false);
 
               // Call after any Sending Report modifications
-              if (nNewAttemptCount >= APCoreConfig.getRetrySendingMaxAttempts ())
-                onPermanentFailure.accept (ex.getMessage ());
-              else
-                onFailed.accept (ex.getMessage ());
+              onFailed.accept (getErrorMessageWithCauses (ex));
 
               for (final var aHandler : APCoreMetaManager.getAllNotificationHandlers ())
                 aHandler.onUnexpectedException ("OutboundOrchestrator.processPendingOutbound",
@@ -1636,14 +1645,16 @@ public final class OutboundOrchestrator
         aOverallSW.stop ();
         aSendingReport.setOverallDurationMillis (aOverallSW.getMillis ());
 
-        // Don't forget to clean up
-        Phase4LogCustomizer.clearThreadLocals ();
-
         if (aSendingReport.isOverallSuccess ())
           aSpan.setStatusOk ();
         else
           aSpan.setStatusError (null);
       }
+    }
+    finally
+    {
+      // Don't forget to clean up
+      Phase4LogCustomizer.clearThreadLocals ();
     }
 
     return aSendingReport;

@@ -20,7 +20,6 @@ webservice. The forwarding is plugged into phoss-ap's `IDocumentForwarderProvide
 | `phoss-ap-core/.../core/inbound/InboundOrchestrator.java` | **patched** | `forwardDocument` overload with an AS4-rejection out-parameter; the synchronous path turns it into an EBMS error. |
 | `phoss-ap-api/.../api/codelist/EInboundStatus.java` | **patched** | New final status `as4_rejected`. |
 | `phoss-ap-db/.../db/InboundTransactionManagerJdbc.java` | **patched** | Duplicate detection ignores `as4_rejected`; lookups by AS4/SBDH ID prefer the retransmission. |
-| `phoss-ap-forwarding/.../forwarding/http/HttpDocumentForwarder.java` | **patched** | Sends the [`X-PHOSS-AP-TRANSACTION-ID` header](#x-phoss-ap-transaction-id-header-fork-specific). |
 | `phoss-ap-core/.../core/outbound/OutboundOrchestrator.java` | **patched** | [AS4 timestamp in millisecond precision](#as4-timestamp-in-millisecond-precision-fork-specific) (Domibus compatibility). |
 
 ## Why a custom SPI forwarder (vs. the built-in HTTP forwarder)
@@ -148,6 +147,13 @@ Middleware deployment.
 **Consequence for C1/C2:** they see `RECEIVED_AB` instead of `RECEIVED_AP` for documents delivered
 through this AP. This is a valid Peppol MLS response code, not a failure.
 
+**Whether a positive MLS is sent at all** is decided by the sender since upstream 0.13.2
+([phax/phoss-ap#110](https://github.com/phax/phoss-ap/issues/110)): an inbound transaction takes
+the `MLS_TYPE` of the received SBDH; if it is missing or invalid, the Peppol default
+`FAILURE_ONLY` applies. With `FAILURE_ONLY` the `AB` is only recorded, not sent — only negative
+MLS (`RE`) go out. `mls.type` in the configuration now only affects the SBDH of **outbound**
+documents (before, it was applied to inbound transactions as well).
+
 **Unaffected:** the `AB` after exhausted forwarding retries (`InboundOrchestrator` 744-759) and the
 `RE` after failed inbound verification (409-423) are independent of this method and unchanged.
 
@@ -172,8 +178,8 @@ forwarding.http.endpoint=http://your-host/forwarding/url/sync
 ```
 
 `AS4RejectingHttpForwarder` delegates everything to the upstream `HttpDocumentForwarder` in
-`http_post_sync` mode (same config keys, request, JSON response contract — plus the
-[`X-PHOSS-AP-TRANSACTION-ID` header](#x-phoss-ap-transaction-id-header-fork-specific)). The only difference:
+`http_post_sync` mode (same config keys, request, JSON response contract, including the
+[transaction ID header](#transaction-id-header)). The only difference:
 
 | Middleware answer on the **first, synchronous** attempt | Upstream `http_post_sync` | `http-sync-as4-reject` |
 |---|---|---|
@@ -207,14 +213,18 @@ Details:
 * This deliberately deviates from the Peppol AS4 profile, which expects failures behind C3 to be
   reported via MLS only.
 
-## X-PHOSS-AP-TRANSACTION-ID header (fork-specific)
+## Transaction ID header
 
-Both HTTP-based forwarders send the phoss-ap transaction ID (`inbound_transaction.id`) as the HTTP
-request header **`X-PHOSS-AP-TRANSACTION-ID`**:
+Both HTTP-based forwarders send the phoss-ap transaction ID (`inbound_transaction.id`) as an HTTP
+request header:
 
 * `HttpDocumentForwarder` (`http_post_sync`, `http_post_async` and therefore also
-  `http-sync-as4-reject`) — next to the upstream `X-SBDH-Instance-ID` header.
-* `MiddlewareReceiverForwarder` (`middleware-data`) — see the contract above.
+  `http-sync-as4-reject`) sends **`X-phoss-AP-Transaction-ID`** next to `X-SBDH-Instance-ID`. This
+  is **upstream** since 0.13.2 ([phax/phoss-ap#105](https://github.com/phax/phoss-ap/issues/105),
+  requested as FR-006); the former fork patch (`X-PHOSS-AP-TRANSACTION-ID`) was dropped in favour of
+  it. HTTP header names are case-insensitive, so receivers reading the old spelling keep working.
+* `MiddlewareReceiverForwarder` (`middleware-data`) sends **`X-PHOSS-AP-TRANSACTION-ID`** — fork
+  code, see the contract above.
 
 The ID stays the same across retry attempts of a transaction, so the backend can recognise a retry
 (e.g. after a lost response) and answer it idempotently instead of rejecting it as a duplicate. A

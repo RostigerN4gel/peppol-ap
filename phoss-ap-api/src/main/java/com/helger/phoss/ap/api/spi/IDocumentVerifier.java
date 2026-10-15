@@ -37,6 +37,13 @@ import com.helger.base.lang.clazz.ClassHelper;
  * {@link com.helger.annotation.style.IsSPIInterface} annotation: it is never loaded via
  * {@link java.util.ServiceLoader} itself, only its two sub-interfaces are.
  * </p>
+ * <p>
+ * An implementation that holds a resource - typically an HTTP connection pool towards the backend
+ * service it asks - may additionally implement {@link AutoCloseable}. Its
+ * {@link AutoCloseable#close()} is then invoked on application shutdown. Note that an
+ * implementation of both sub-interfaces is loaded once per sub-interface, so it is closed once per
+ * instance and must tolerate being closed more than once.
+ * </p>
  *
  * @author Philip Helger
  * @since 0.12.0

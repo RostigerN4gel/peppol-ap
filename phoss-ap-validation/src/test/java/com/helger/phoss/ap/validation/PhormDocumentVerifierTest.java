@@ -77,8 +77,7 @@ public final class PhormDocumentVerifierTest
     final PhormRequest aRequest = PhormDocumentVerifier.resolveRequestFromSBDHData (aData,
                                                                                     DOC_PATH,
                                                                                     _docTypeID (DOCTYPE_FACTURX));
-    assertEquals ("/api/hybrid_validate", aRequest.apiPath ());
-    assertEquals ("application/pdf", aRequest.contentType ().getMimeType ());
+    assertTrue (aRequest.isHybrid ());
     assertArrayEquals (PDF_BYTES, aRequest.payloadBytes ());
     assertEquals ("FR", aRequest.countryC1 ());
   }
@@ -109,7 +108,7 @@ public final class PhormDocumentVerifierTest
     final PhormRequest aRequest = PhormDocumentVerifier.resolveRequestFromSBDHData (aData,
                                                                                     DOC_PATH,
                                                                                     _docTypeID (DOCTYPE_FACTURX));
-    assertEquals ("/api/dd_and_validate/", aRequest.apiPath ());
+    assertFalse (aRequest.isHybrid ());
     assertNull (aRequest.payloadBytes ());
     assertNull (aRequest.countryC1 ());
   }
@@ -121,8 +120,7 @@ public final class PhormDocumentVerifierTest
     aData.setBusinessMessage (DOMReader.readXMLDOM ("<Invoice/>").getDocumentElement ());
 
     // Not a "BinaryContent" element - stay with the regular validation
-    assertEquals ("/api/dd_and_validate/",
-                  PhormDocumentVerifier.resolveRequestFromSBDHData (aData, DOC_PATH, _docTypeID (DOCTYPE_FACTURX))
-                                       .apiPath ());
+    assertFalse (PhormDocumentVerifier.resolveRequestFromSBDHData (aData, DOC_PATH, _docTypeID (DOCTYPE_FACTURX))
+                                      .isHybrid ());
   }
 }

@@ -315,8 +315,7 @@ public final class RetryScheduler
             }
             catch (final Exception ex)
             {
-              LOGGER.error ("Error sending the fallback MLS for inbound transaction '" + aInboundTx.getID () + "'",
-                            ex);
+              LOGGER.error ("Error sending the fallback MLS for inbound transaction '" + aInboundTx.getID () + "'", ex);
 
               for (final var aHandler : APCoreMetaManager.getAllNotificationHandlers ())
                 aHandler.onUnexpectedException ("RetryScheduler._sendMlsAfterApiTimeout",

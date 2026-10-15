@@ -18,6 +18,7 @@ package com.helger.phoss.ap.core.outbound;
 
 import org.jspecify.annotations.NonNull;
 
+import com.helger.annotation.concurrent.Immutable;
 import com.helger.base.enforce.ValueEnforcer;
 import com.helger.base.tostring.ToStringGenerator;
 import com.helger.peppolid.IParticipantIdentifier;
@@ -32,6 +33,7 @@ import com.helger.peppolid.IParticipantIdentifier;
  * @author Philip Helger
  * @since 0.11.0
  */
+@Immutable
 public final class MlsSmpFallback
 {
   private final IParticipantIdentifier m_aFallbackReceiverID;
