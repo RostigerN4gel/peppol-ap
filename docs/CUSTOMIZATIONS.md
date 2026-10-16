@@ -21,6 +21,8 @@ webservice. The forwarding is plugged into phoss-ap's `IDocumentForwarderProvide
 | `phoss-ap-api/.../api/codelist/EInboundStatus.java` | **patched** | New final status `as4_rejected`. |
 | `phoss-ap-db/.../db/InboundTransactionManagerJdbc.java` | **patched** | Duplicate detection ignores `as4_rejected`; lookups by AS4/SBDH ID prefer the retransmission. |
 | `phoss-ap-core/.../core/outbound/OutboundOrchestrator.java` | **patched** | [AS4 timestamp in millisecond precision](#as4-timestamp-in-millisecond-precision-fork-specific) (Domibus compatibility). |
+| `phoss-ap-webapp/.../webapp/sk/SKTDDService.java` + `SKTDDController.java` | **new** | [Peppol SK TDD](#peppol-sk-tax-data-document-tdd-fork-specific): `POST /api/sk/tdd/{C2\|C3}` builds, validates and sends a Slovak TDD. |
+| `phoss-ap-webapp/pom.xml` | **patched** | Dependencies `peppol-sk-tdd` (+ `phive-xml` aligned to `${phive.version}`) and `peppol-sk-testfiles` (test). |
 
 ## Why a custom SPI forwarder (vs. the built-in HTTP forwarder)
 
@@ -251,6 +253,64 @@ such as `.29147455` is left unchanged. So neither measure is enough on its own:
 |---|---|---|---|
 | `.29147455` | `.29147455` ❌ | `.291` ✅ | `.291` ✅ |
 | `.29047455` | `.290` ✅ | `.29` ❌ (presumably) | `.290` ✅ |
+
+## Peppol SK Tax Data Document (TDD) (fork-specific)
+
+Slovakia's 5-corner model (from 2027-01-01) requires the AP of a Slovak seller (C2) and buyer (C3)
+to report every domestic invoice as a **Tax Data Document (TDD)** to the tax authority AP (C5). This
+fork implements the **AP part** of it (stage 1 of FR-008): building, validating and sending a TDD.
+The **orchestration** - when a TDD of type `S`, `R` or `D` is needed, combining the MLS of the
+invoice and of the TDD (SRA tables 1 and 2), SLA timers and follow-ups - is done by the **Middleware**
+(stage 2). The AP keeps no link between an invoice and its TDDs.
+
+TDD creation and validation come from
+[`com.helger.peppol:peppol-sk-tdd`](https://github.com/phax/peppol-sk) (Apache 2.0; still *work
+in progress* for the member review of the SK TDD specification, so the data model may change):
+mapping of UBL Invoice / Credit Note, Invoice UUID v5 (SRA 9.2.3) and all three Schematron layers.
+
+```properties
+sk.tdd.enabled=true
+# mandatory: this AP as reporter's representative (SK AP ID, scheme 0242)
+sk.tdd.reporters-representative.participant-id=iso6523-actorid-upis::0242:<id>
+# defaults
+#sk.tdd.tax-authority.participant-id=iso6523-actorid-upis::0242:000357-TaxAuthority.SK
+#sk.tdd.tax-authority.id=SK
+#sk.tdd.c1-country-code=SK
+```
+
+`POST /api/sk/tdd/{reporterRole}` (`X-Token` like every `/api/**` call), body = the UBL 2.1
+Invoice or Credit Note:
+
+| Parameter | Default | Meaning |
+|---|---|---|
+| `reporterRole` (path) | – | `C2` (AP of the seller) or `C3` (AP of the buyer) |
+| `type` | `S` | `S` submit, `R` resubmit, `D` disregard |
+| `scope` | `D` | `D` domestic, `IC` intra-community, `INTL` international |
+| `reportingParty` | seller / buyer `EndpointID` | Peppol participant ID of the reporting party; also the SBDH sender |
+| `tddUUID` | random UUID v4 | UUID of the TDD |
+| `sbdhInstanceID` | random | SBDH Instance Identifier of the TDD transmission |
+| `send` | `true` | `false` = dry run: build and validate only, the TDD is returned as `tddXML` |
+| `custom1`..`custom3` | – | stored with the outbound transaction |
+
+The TDD is sent as a **regular outbound transaction** (document type
+`busdox-docid-qns::urn:peppol:schema:sk-taxdata:1.0::TaxData##urn:peppol:taxdata:sk-1::1.0`, process
+`cenbii-procid-ubl::urn:peppol:taxreporting`), so storage, retry, circuit breaker, status API and
+the correlation of the MLS from C5 work as for every document. The JSON response contains
+`tddUUID`, `reportedDocumentUUID` (the Invoice UUID v5), `sbdhInstanceID`,
+`outboundTransactionID`, `sendingReport` and, if any, `validationWarnings`. A TDD that fails the
+Schematron is not sent (HTTP 422 with `issues`). The MLS from C5 is visible via
+`GET /api/outbound/status/{sbdhInstanceID}` of the TDD transmission.
+
+Notes:
+
+* A TDD must carry `MLS_TYPE=ALWAYS_SEND`. The AP puts the global `mls.type` into every outbound
+  SBDH, so `mls.type` must stay at its default; otherwise the response carries a `warning`.
+* With `verification.outbound.enabled=true` the outbound verifier (phorm) is also applied to the
+  TDD. Check that the phorm version knows the SK TDD, or the TDD is rejected / handled per
+  `verification.verifier-fail-mode`.
+* The TDD carries no reference to the SBDH of the invoice transmission (SRA p. 40) - the builder
+  of `peppol-sk-tdd` 0.2.2 has no field for it (FR-008, open question 2).
+* Accreditation, the central SK SMP, the end-user token and the testbed are not covered here.
 
 ## Build
 

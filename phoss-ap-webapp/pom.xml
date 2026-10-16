@@ -68,6 +68,24 @@
       <groupId>com.helger.phoss.ap</groupId>
       <artifactId>phoss-ap-validation</artifactId>
     </dependency>
+    <!-- FORK: Peppol SK Tax Data Document (TDD) creation and validation, see SKTDDController -->
+    <dependency>
+      <groupId>com.helger.peppol</groupId>
+      <artifactId>peppol-sk-tdd</artifactId>
+      <version>0.2.2</version>
+    </dependency>
+    <!-- FORK: peppol-sk-tdd 0.2.2 was built against phive 12.1.0 - align it with the phive used by the AP -->
+    <dependency>
+      <groupId>com.helger.phive</groupId>
+      <artifactId>phive-xml</artifactId>
+      <version>${phive.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>com.helger.peppol</groupId>
+      <artifactId>peppol-sk-testfiles</artifactId>
+      <version>0.2.2</version>
+      <scope>test</scope>
+    </dependency>
 
     <dependency>
       <groupId>org.glassfish.jaxb</groupId>
