@@ -261,7 +261,9 @@ to report every domestic invoice as a **Tax Data Document (TDD)** to the tax aut
 fork implements the **AP part** of it (stage 1 of FR-008): building, validating and sending a TDD.
 The **orchestration** - when a TDD of type `S`, `R` or `D` is needed, combining the MLS of the
 invoice and of the TDD (SRA tables 1 and 2), SLA timers and follow-ups - is done by the **Middleware**
-(stage 2). The AP keeps no link between an invoice and its TDDs.
+(stage 2). The AP keeps no link between an invoice and its TDDs. The APIs and the process the
+Middleware follows as C2 and C3 are described in [SK-TDD-MIDDLEWARE-EN.md](SK-TDD-MIDDLEWARE-EN.md)
+(German: [SK-TDD-MIDDLEWARE.md](SK-TDD-MIDDLEWARE.md)).
 
 TDD creation and validation come from
 [`com.helger.peppol:peppol-sk-tdd`](https://github.com/phax/peppol-sk) (Apache 2.0; still *work

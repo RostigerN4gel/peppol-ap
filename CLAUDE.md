@@ -110,7 +110,10 @@ answered by a `ProcessResult` XML). See [CUSTOMIZATIONS.md](docs/CUSTOMIZATIONS.
 
 - This repository is kept a **pure fork with the code customizations**. `helper/` only holds
   `build-phoss-ap.sh`; operations scripts and docs belong in
-  [peppol-helper](https://github.com/RostigerN4gel/peppol-helper), not here.
+  [peppol-helper](https://github.com/RostigerN4gel/peppol-helper), not here. `docs/` holds
+  `CUSTOMIZATIONS.md` plus the Middleware integration guide for the fork's SK TDD API
+  (`SK-TDD-MIDDLEWARE.md` German, `SK-TDD-MIDDLEWARE-EN.md` English) - keep both language
+  versions in sync.
 - `dist/` receives the exported jar from `build-phoss-ap.sh` (without the local profile configs,
   unless `INCLUDE_PROFILE_CONFIG=1`) — do not commit `dist/`.
 - Commit messages / PRs: this is a fork; keep upstream-mergeable changes minimal and isolate fork
